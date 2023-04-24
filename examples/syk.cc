@@ -20,6 +20,7 @@ Revision History:
 #include <memory>
 #include <filesystem>
 #include "argparser.h"
+#include "pcg_random.h"
 
 #ifdef MAX_NUM_FERMIONS
 #define REAPERS_SPIN_SITES	(MAX_NUM_FERMIONS / 2 - 1)
@@ -37,6 +38,7 @@ struct SykArgParser : ArgParser {
     bool want_greenfcn;
     bool want_otoc;
     bool truncate_fp64;
+    bool use_mt19937;
     float beta;
 
 private:
@@ -54,7 +56,10 @@ private:
 	     "When both --fp32 and --fp64 are specified, truncate the fp64"
 	     " couplings and random states to fp32, rather than promoting"
 	     " fp32 to fp64. By default, fp32 couplings and random states"
-	     " are promoted to fp64.");
+	     " are promoted to fp64.")
+	    ("use-mt19937", progopts::bool_switch(&use_mt19937)->default_value(false),
+	     "Use the MT19937 from the C++ standard library as the pRNG."
+	     " By default, PCG64 is used.");
     }
 
     bool optcheck_hook() {
@@ -281,10 +286,11 @@ class Runner : protected SykArgParser {
 	logf.open(std::string("Log") + jobname + ss.str());
 	Logger logger(verbose, logf);
 	logger << "Running " << jobname << " calculation using build "
-	      << GITHASH << ".\nParameters are: N " << N
-	      << " M " << M << " beta " << beta << " k " << sparsity
-	      << " tmax " << tmax << " nsteps " << nsteps
-	      << " krydim " << krylov_dim << endl;
+	       << GITHASH << ".\nParameters are: N " << N
+	       << " M " << M << " beta " << beta << " k " << sparsity
+	       << " tmax " << tmax << " nsteps " << nsteps
+	       << " krydim " << krylov_dim << " "
+	       << (use_mt19937 ? "MT19937" : "PCG64") << endl;
 	std::unique_ptr<State<float>> init32, s32;
 	std::unique_ptr<State<double>> init64, s64;
 	if (fp32) {
@@ -376,13 +382,27 @@ public:
 	if (!parse(argc, argv)) {
 	    return 1;
 	}
-	std::random_device rd;
-	std::mt19937 rg(rd());
-	if (want_greenfcn) {
-	    runjob<Green>(rg);
-	}
-	if (want_otoc) {
-	    runjob<OTOC>(rg);
+	if (use_mt19937) {
+	    // The user request for mt19937 as the pRNG. Use it.
+	    std::random_device rd;
+	    std::mt19937 rg(rd());
+	    if (want_otoc) {
+		runjob<OTOC>(rg);
+	    }
+	    if (want_greenfcn) {
+		runjob<Green>(rg);
+	    }
+	} else {
+	    // Seed with a real random value, if available
+	    pcg_extras::seed_seq_from<std::random_device> seed_source;
+	    // Make a random number engine
+	    pcg64 rg(seed_source);
+	    if (want_otoc) {
+		runjob<OTOC>(rg);
+	    }
+	    if (want_greenfcn) {
+		runjob<Green>(rg);
+	    }
 	}
 	return 0;
     }
