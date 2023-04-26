@@ -27,6 +27,7 @@ Revision History:
 #include <memory>
 #include <random>
 #include <tuple>
+#include <set>
 #include <vector>
 
 #ifdef REAPERS_NOGPU

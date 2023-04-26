@@ -39,6 +39,7 @@ struct SykArgParser : ArgParser {
     bool want_otoc;
     bool truncate_fp64;
     bool use_mt19937;
+    bool regularize;
     float beta;
 
 private:
@@ -59,7 +60,9 @@ private:
 	     " are promoted to fp64.")
 	    ("use-mt19937", progopts::bool_switch(&use_mt19937)->default_value(false),
 	     "Use the MT19937 from the C++ standard library as the pRNG."
-	     " By default, PCG64 is used.");
+	     " By default, PCG64 is used.")
+	    ("regularize", progopts::bool_switch(&regularize)->default_value(false),
+	     "Generate regularized sparse SYK.");
     }
 
     bool optcheck_hook() {
@@ -235,6 +238,7 @@ class Runner : protected SykArgParser {
     void runjob(RandGen &rg) {
 	std::stringstream ss;
 	ss << "N" << N << "M" << M << "beta" << beta << "k" << sparsity
+	   << (regularize ? "reg" : "")
 	   << "tmax" << tmax << "nsteps" << nsteps << "krydim" << krylov_dim;
 	Eval<float> eval32(*this);
 	Eval<double> eval64(*this);
@@ -288,6 +292,7 @@ class Runner : protected SykArgParser {
 	logger << "Running " << jobname << " calculation using build "
 	       << GITHASH << ".\nParameters are: N " << N
 	       << " M " << M << " beta " << beta << " k " << sparsity
+	       << (regularize ? " regularized" : "")
 	       << " tmax " << tmax << " nsteps " << nsteps
 	       << " krydim " << krylov_dim << " "
 	       << (use_mt19937 ? "MT19937" : "PCG64") << endl;
@@ -310,10 +315,10 @@ class Runner : protected SykArgParser {
 	    logger << "Computing disorder " << u << endl;
 	    if (!fp32 || truncate_fp64) {
 		init64->random_state();
-		ham64 = syk64.gen_ham(rg);
+		ham64 = syk64.gen_ham(rg, regularize);
 	    } else {
 		init32->random_state();
-		ham32 = syk32.gen_ham(rg);
+		ham32 = syk32.gen_ham(rg, regularize);
 	    }
 	    if (dump_ham) {
 		if (!fp32 || truncate_fp64) {
