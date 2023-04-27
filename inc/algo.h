@@ -351,8 +351,8 @@ public:
 
 	    // Check convergence. If a maximum number of iteration is specified,
 	    // and we have reached it, then exit. If the Arnoldi procedure
-	    // brokedown (this indicates an invariant subspace, ie. convergence),
-	    // then exit. Otherwise, exit when the tolerance is achieved.
+	    // brokedown (this indicates an invariant subspace), then exit.
+	    // Otherwise, exit when the tolerance is achieved.
 	    if ((max_iters && (niters >= max_iters)) || brokedown || nrm < tol) {
 		s.inc_curbuf(krydim+1);
 		break;

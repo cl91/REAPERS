@@ -411,8 +411,8 @@ public:
     //
     // Given n, this function returns res and (+/- c).
     //
-    // Note although in our convention, sx.sz = sy, for the spin state index n we
-    // apply sx first and then sy. In other words, it's a contra-variant functor.
+    // Note that in our convention, for sy = sx.sz acting on the spin state index n
+    // we apply sx first and then sz. In other words, it's a contra-variant functor.
     // This is why we define sx to be 0b01 and sz to be 0b10.
     DEVHOST complex<FpType> apply(StateType n, StateType &res) const {
 	bool minus = false;

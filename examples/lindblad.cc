@@ -13,7 +13,8 @@ Abstract:
     due to publication requirement of having a single repo for the code of our
     paper [1] and is not designed to be readable by any stretch of the word.
 
-    [1] [INSERT-INFO-WHEN-PUBLISHED]
+    [1] Entanglement Transition and Replica Wormhole in the Dissipative
+        Sachdev-Ye-Kitaev Model, arXiv:2306.12571 [quant-ph]
 
 Revision History:
 
@@ -365,7 +366,7 @@ int main(int argc, const char *argv[])
 		  << "-GPU"
 #endif
 #ifdef __INTEL_LLVM_COMPILER
-		  << "-INTEL"
+		  << "-AVX"
 #endif
 		  << "-" GITHASH ", powered by the REAPERS library.\n" << std::endl;
 	Eval eval;

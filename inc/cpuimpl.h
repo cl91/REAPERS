@@ -495,8 +495,7 @@ public:
     }
 };
 
-// Class that implements basic vector operations on the CPU. This is for testing
-// purpose only and is not suitable for realistic calculations.
+// Class that implements basic vector operations on the CPU, using OpenMP.
 // Note: we cannot make this a template because this class has static members
 // that can only be initialized once. In terms of design patterns this is a
 // so-called 'singleton' class.

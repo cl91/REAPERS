@@ -8,7 +8,7 @@ Module Name:
 
 Abstract:
 
-    This program computes the retarded Green's function and the OTOC of the SYK model.
+    This program computes the Green's function and the OTOC of the SYK model.
 
 Revision History:
 
@@ -59,7 +59,7 @@ private:
     void parse_hook() {
 	optdesc.add_options()
 	    ("green", progopts::bool_switch(&want_greenfcn)->default_value(false),
-	     "Compute the retarded Green's function.")
+	     "Compute the Green's function.")
 	    ("otoc", progopts::bool_switch(&want_otoc)->default_value(false),
 	     "Compute the OTOC. If neither --green or --otoc is specified, compute both.")
 	    ("dump-ham", progopts::bool_switch(&dump_ham)->default_value(false),
@@ -97,7 +97,7 @@ private:
 	     "Use exact diagonalization rather than the Krylov method to compute"
 	     " the state evolution exp(-iHt).")
 	    ("swap", progopts::bool_switch(&swap)->default_value(false),
-	     "Enable swapping for VRAM by offloading it to host memory.");
+	     "Offload the initial state from VRAM to host memory.");
     }
 
     bool optcheck_hook() {
@@ -228,7 +228,7 @@ public:
     }
 };
 
-// This is the evaluator class for the retarded Green's function.
+// This is the evaluator class for the Green's function.
 template<RealScalar FpType>
 class Green : public BaseEval<FpType> {
     void pre_evolve(const SumOps<FpType> &ham, State<FpType> &s, FpType beta) {
@@ -496,7 +496,7 @@ public:
 	    seed = rd();
 	}
 	if (use_mt19937) {
-	    // The user request for mt19937 as the pRNG. Use it.
+	    // The user requested mt19937 as the pRNG. Use it.
 	    std::mt19937 rg(seed);
 	    if (want_otoc) {
 		runjob<OTOC>(rg);
@@ -505,7 +505,7 @@ public:
 		runjob<Green>(rg);
 	    }
 	} else {
-	    // Make a random number engine
+	    // Use PCG64 as the random number engine
 	    pcg64 rg(seed);
 	    if (want_otoc) {
 		runjob<OTOC>(rg);
@@ -526,7 +526,7 @@ int main(int argc, const char *argv[])
 		  << "-GPU"
 #endif
 #ifdef __INTEL_LLVM_COMPILER
-		  << "-INTEL"
+		  << "-AVX"
 #endif
 		  << "-" GITHASH ", powered by the REAPERS library.\n" << std::endl;
 	Runner runner;

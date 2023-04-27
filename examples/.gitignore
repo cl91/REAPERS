@@ -8,6 +8,7 @@ simple-syk-krylov
 syk
 lindblad
 *-debug
+*-opt
 *-gpu
 *-intel
 *-gpu-icpx
