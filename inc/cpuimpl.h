@@ -99,9 +99,15 @@ public:
 	return *this;
     }
 
-    // Multiply the specified operator from the right with this operator
+    // Scalar multiplication
     HostSumOps &operator*=(const ComplexScalar &rhs) {
 	*this = operator*(rhs);
+	return *this;
+    }
+
+    // Scalar "division", defined as scalar multiplication by 1/s
+    HostSumOps &operator/=(const ComplexScalar &s) {
+	*this = operator*(ComplexScalar{1.0,0.0}/s);
 	return *this;
     }
 

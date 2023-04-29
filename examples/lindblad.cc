@@ -86,10 +86,10 @@ class Eval : protected ArgParser {
 	FpType eps = unif_real(rg);
 	if (p < eps) {
 	    evolve(psi, ham, forward ? dt : -dt);
+	    psi.normalize();
 	} else {
             psi *= syk.fermion_ops(unif_int(rg));
 	}
-	psi.normalize();
     }
 
     // Simulate one disorder realization
@@ -174,7 +174,10 @@ class Eval : protected ArgParser {
 
 	std::random_device rd;
 	std::mt19937 rg(rd());
-	SYK<FpType> syk(N, sparsity);
+	// Here we set standard_gamma to false, so the gamma_i operators
+	// will be normalized to {gamma_i,gamma_j}=2delta_ij, which saves
+	// us some time because it preserves the norm of state vectors.
+	SYK<FpType> syk(N, sparsity, 1.0, false);
 	std::vector<FpType> tarray;
 	if (t0 != 0.0) {
 	    tarray.push_back(t0);

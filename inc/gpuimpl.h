@@ -142,10 +142,17 @@ public:
 	return *this;
     }
 
-    // Multiply the specified operator from the right with this operator
+    // Scalar multiplication
     DevSumOps &operator*=(const complex<FpType> &rhs) {
 	release();
 	HostSumOps<FpType>::operator*=(rhs);
+	return *this;
+    }
+
+    // Scalar "division", defined as scalar multiplication by 1/s
+    DevSumOps &operator/=(const complex<FpType> &s) {
+	release();
+	HostSumOps<FpType>::operator/=(s);
 	return *this;
     }
 

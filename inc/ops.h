@@ -298,6 +298,11 @@ public:
 	return *this;
     }
 
+    SpinOp &operator/=(ComplexScalar s) {
+	coeff *= ComplexScalar{1.0,0.0}/s;
+	return *this;
+    }
+
     // In the case of operator *= the RHS always right-multiplies the LHS.
     SpinOp &operator*=(const SpinOp &rhs) {
 	*this = *this * rhs;

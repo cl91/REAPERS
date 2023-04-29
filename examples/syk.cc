@@ -40,7 +40,9 @@ struct SykArgParser : ArgParser {
     bool truncate_fp64;
     bool use_mt19937;
     bool regularize;
+    bool non_standard_gamma;
     float beta;
+    float j_coupling;
 
 private:
     void parse_hook() {
@@ -62,7 +64,13 @@ private:
 	     "Use the MT19937 from the C++ standard library as the pRNG."
 	     " By default, PCG64 is used.")
 	    ("regularize", progopts::bool_switch(&regularize)->default_value(false),
-	     "Generate regularized sparse SYK.");
+	     "Generate regularized sparse SYK.")
+	    ("non-standard-gamma", progopts::bool_switch(&non_standard_gamma)->default_value(false),
+	     "Use the non-standard normalization of gamma matrices {gamma_i, gamma_j}"
+	     " = 2 delta_ij. This is for testing purpose only and should give the exact"
+	     " same simulation results.")
+	    ("J", progopts::value<float>(&j_coupling)->default_value(1.0),
+	     "Specifies the coupling strength J. The default is 1.");
     }
 
     bool optcheck_hook() {
@@ -238,8 +246,11 @@ class Runner : protected SykArgParser {
     void runjob(RandGen &rg) {
 	std::stringstream ss;
 	ss << "N" << N << "M" << M << "beta" << beta << "k" << sparsity
-	   << (regularize ? "reg" : "")
+	   << (regularize ? "reg" : "") << (non_standard_gamma ? "nsgamma" : "")
 	   << "tmax" << tmax << "nsteps" << nsteps << "krydim" << krylov_dim;
+	if (j_coupling != 1.0) {
+	    ss << "J" << j_coupling;
+	}
 	Eval<float> eval32(*this);
 	Eval<double> eval64(*this);
 	auto jobname = eval32.name;
@@ -306,8 +317,8 @@ class Runner : protected SykArgParser {
 	    init64 = std::make_unique<State<double>>(N/2-1);
 	    s64 = std::make_unique<State<double>>(N/2-1);
 	}
-	SYK<float> syk32(N, sparsity);
-	SYK<double> syk64(N, sparsity);
+	SYK<float> syk32(N, sparsity, j_coupling, non_standard_gamma);
+	SYK<double> syk64(N, sparsity, j_coupling, non_standard_gamma);
 	HamOp<float> ham32;
 	HamOp<double> ham64;
 	double dt = tmax / nsteps;

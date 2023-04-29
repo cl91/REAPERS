@@ -28,6 +28,7 @@ template<typename FpType>
 class SYK {
     int N;
     FpType sp;
+    bool standard_gamma;
     std::vector<FermionOp<FpType>> gamma;
     FpType scale;
     FpType p;
@@ -79,13 +80,31 @@ class SYK {
     }
 
 public:
-    SYK(int N, FpType sp) : N(N), sp(sp) {
+    // Specify standard_gamma=false if you want {gamma_i,gamma_j}=2delta_ij.
+    SYK(int N, FpType sp, FpType J = 1.0, bool standard_gamma = true)
+	: N(N), sp(sp), standard_gamma(standard_gamma) {
 	if (N < 4) {
 	    ThrowException(InvalidArgument, "N", "must be at least four");
 	} else if (N & 1) {
 	    ThrowException(InvalidArgument, "N", "must be even");
 	}
-	scale = std::sqrt(3.0/(8.0*N*N*N));
+	// If the Fermionic field operators gamma_i are normalized to
+	// {gamma_i,gamma_j} = delta_ij (which is the default and the most
+	// commonly used "standard" normalization for the field ops), the J
+	// scaling should be sqrt(6/N^3). If gamma is instead normalized to
+	// {gamma_i,gamma_j} = 2delta_ij, the scaling should be sqrt(3/8N^3)
+	// so the Hamiltonian will agree with the standard normalization.
+	// If your problem involves multiplying a state vector by gamma_i
+	// and then normalize that state vector, you can set standard_gamma
+	// to false so the fermionic field operators will preserve the norm
+	// of state vectors (which might make things faster). We use this
+	// in the Lindblad calculation in examples/lindblad.cc.
+	if (standard_gamma) {
+	    scale = std::sqrt(6.0/(N*N*N));
+	} else {
+	    scale = std::sqrt(3.0/(8*N*N*N));
+	}
+	scale *= J;
 	p = sp*24 / ((N-1)*(N-2)*(N-3));
 	if (sp != 0.0) {
 	    scale /= sqrt(p);
@@ -200,11 +219,12 @@ public:
 	std::normal_distribution<FpType> norm(0.0, 1.0);
 	HamOp<FpType> ham;
 	for (auto edge : edges) {
+	    auto sg = standard_gamma;
 	    u8 i, j, k, l;
 	    std::tie(i,j,k,l) = edge;
-	    ham += scale * norm(gen) * FermionOp<FpType>(N, i)
-		* FermionOp<FpType>(N, j) * FermionOp<FpType>(N, k)
-		* FermionOp<FpType>(N, l);
+	    ham += scale * norm(gen) * FermionOp<FpType>(N, i, sg)
+		* FermionOp<FpType>(N, j, sg) * FermionOp<FpType>(N, k, sg)
+		* FermionOp<FpType>(N, l, sg);
 	}
 	return ham;
     }
@@ -226,9 +246,10 @@ public:
 			if (sp != 0.0 && !bern(gen)) {
 			    continue;
 			}
-			ham += scale * norm(gen) * FermionOp<FpType>(N, i)
-			    * FermionOp<FpType>(N, j) * FermionOp<FpType>(N, k)
-			    * FermionOp<FpType>(N, l);
+			auto sg = standard_gamma;
+			ham += scale * norm(gen) * FermionOp<FpType>(N, i, sg)
+			    * FermionOp<FpType>(N, j, sg) * FermionOp<FpType>(N, k, sg)
+			    * FermionOp<FpType>(N, l, sg);
 		    }
 		}
 	    }

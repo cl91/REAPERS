@@ -45,6 +45,32 @@ struct BlockDiag {
 	RR += rhs.RR;
 	return *this;
     }
+
+    template<typename Fp>
+    BlockDiag &operator*=(Fp c) {
+	LL *= c;
+	RR *= c;
+	return *this;
+    }
+
+    template<typename Fp>
+    BlockDiag &operator*=(complex<Fp> c) {
+	LL *= c;
+	RR *= c;
+	return *this;
+    }
+
+    template<typename Fp>
+    BlockDiag &operator/=(Fp c) {
+	*this *= 1.0/c;
+	return *this;
+    }
+
+    template<typename Fp>
+    BlockDiag &operator/=(complex<Fp> c) {
+	*this *= 1.0/c;
+	return *this;
+    }
 };
 
 // This class represents a block anti-diagonal matrix
@@ -62,6 +88,32 @@ struct BlockAntiDiag {
     BlockAntiDiag &operator+=(const BlockAntiDiag &rhs) {
 	LR += rhs.LR;
 	RL += rhs.RL;
+	return *this;
+    }
+
+    template<typename Fp>
+    BlockAntiDiag &operator*=(Fp c) {
+	LR *= c;
+	RL *= c;
+	return *this;
+    }
+
+    template<typename Fp>
+    BlockAntiDiag &operator*=(complex<Fp> c) {
+	LR *= c;
+	RL *= c;
+	return *this;
+    }
+
+    template<typename Fp>
+    BlockAntiDiag &operator/=(Fp c) {
+	*this *= 1.0/c;
+	return *this;
+    }
+
+    template<typename Fp>
+    BlockAntiDiag &operator/=(complex<Fp> c) {
+	*this *= 1.0/c;
 	return *this;
     }
 };
@@ -160,8 +212,9 @@ inline std::ostream &operator<<(std::ostream &os, const BlockAntiDiag<T> &op) {
 // where for 0 <= i <= N-3, the bLR_i and bRL_i matrices are identical to each
 // other and are exactly the b_i matrix from the previous (N-2) iteration. For
 // i == N-2, bLR and bRL are also identical to each other and are simply the
-// single site operator sz(N/2-2), and for i == N-1, bLR is simply -i times the
-// identity matrix, and bRL is simply i times the identity matrix.
+// single site operator sz(N/2-2) (divided by sqrt2 if standard_gamma is true),
+// and for i == N-1, bLR is simply -i times the identity matrix (divided by
+// sqrt2 if needed), and bRL is simply i times the identity matrix (div. sqrt2).
 template<typename FpType>
 class FermionOp : public BlockAntiDiag<SpinOp<FpType>> {
     using IndexType = u8;
@@ -181,7 +234,7 @@ class FermionOp : public BlockAntiDiag<SpinOp<FpType>> {
 
 public:
     // Construct the n-th Fermion field operator using the formula discussed above
-    FermionOp(IndexType N, IndexType n) :
+    FermionOp(IndexType N, IndexType n, bool standard_gamma = true) :
 	BlockAntiDiag<SpinOp<FpType>>(SpinOp<FpType>::identity(),
 				      SpinOp<FpType>::identity()) {
 	check_field_index(N, n);
@@ -197,6 +250,9 @@ public:
 		    : SpinOp<FpType>::sigma_z((n-1)/2);
 	    }
 	    this->RL = this->LR;
+	}
+	if (standard_gamma) {
+	    *this /= sqrt(2.0);
 	}
     }
 };
