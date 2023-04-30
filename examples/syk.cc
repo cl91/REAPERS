@@ -355,11 +355,11 @@ class Runner : protected SykArgParser {
 	    }
 	    if (dump_ham) {
 		if (!fp32 || truncate_fp64) {
-		    hamf << ham64.LL << std::endl;
-		    hamf << ham64.RR << std::endl;
+		    hamf << "H_LL = " << ham64.LL << std::endl;
+		    hamf << "H_RR = " << ham64.RR << std::endl;
 		} else {
-		    hamf << ham32.LL << std::endl;
-		    hamf << ham32.RR << std::endl;
+		    hamf << "H_LL = " << ham32.LL << std::endl;
+		    hamf << "H_RR = " << ham32.RR << std::endl;
 		}
 	    }
 	    // Compute one single disorder realization.
