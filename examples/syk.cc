@@ -44,6 +44,7 @@ struct SykArgParser : ArgParser {
     float beta;
     float j_coupling;
     int otoc_idx;
+    float kry_tol;
 
 private:
     void parse_hook() {
@@ -73,7 +74,10 @@ private:
 	    ("J", progopts::value<float>(&j_coupling)->default_value(1.0),
 	     "Specifies the coupling strength J. The default is 1.")
 	    ("otoc-index", progopts::value<int>(&otoc_idx)->default_value(-1),
-	     "Specifies the second fermion index in the OTOC. The default is N-2.");
+	     "Specifies the second fermion index in the OTOC. The default is N-2.")
+	    ("tol", progopts::value<float>(&kry_tol)->default_value(0.0),
+	     "Specifies the tolerance of the Krylov algorithm. The default is"
+	     " machine precision.");
     }
 
     bool optcheck_hook() {
@@ -149,7 +153,11 @@ protected:
 
     void evolve_step(const SumOps<FpType> &ham, State<FpType> &s,
 		     FpType t, FpType beta) {
-	s.evolve(ham, t, beta, args.krylov_dim);
+	if (args.kry_tol != 0.0) {
+	    s.evolve(ham, t, beta, args.krylov_dim, (FpType)args.kry_tol);
+	} else {
+	    s.evolve(ham, t, beta, args.krylov_dim);
+	}
     }
 
 public:
@@ -261,6 +269,9 @@ class Runner : protected SykArgParser {
 	}
 	if (otoc_idx >= 0) {
 	    ss << "otocidx" << otoc_idx;
+	}
+	if (kry_tol != 0.0) {
+	    ss << "tol" << kry_tol;
 	}
 	Eval<float> eval32(*this);
 	Eval<double> eval64(*this);
