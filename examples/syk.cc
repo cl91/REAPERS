@@ -43,6 +43,7 @@ struct SykArgParser : ArgParser {
     bool non_standard_gamma;
     float beta;
     float j_coupling;
+    int otoc_idx;
 
 private:
     void parse_hook() {
@@ -70,7 +71,9 @@ private:
 	     " = 2 delta_ij. This is for testing purpose only and should give the exact"
 	     " same simulation results.")
 	    ("J", progopts::value<float>(&j_coupling)->default_value(1.0),
-	     "Specifies the coupling strength J. The default is 1.");
+	     "Specifies the coupling strength J. The default is 1.")
+	    ("otoc-index", progopts::value<int>(&otoc_idx)->default_value(-1),
+	     "Specifies the second fermion index in the OTOC. The default is N-2.");
     }
 
     bool optcheck_hook() {
@@ -133,15 +136,15 @@ inline Logger &endl(Logger &ev) {
 // realization.
 template<typename FpType>
 class BaseEval {
-    const SykArgParser &args;
-
     virtual void pre_evolve(const SumOps<FpType> &ham, State<FpType> &s,
 			    FpType beta) = 0;
     virtual void evolve(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
-			State<FpType> &s, FpType t, FpType beta, int N,
+			State<FpType> &s, FpType t, FpType beta,
 			const std::vector<FermionOp<FpType>> &ops) = 0;
 
 protected:
+    const SykArgParser &args;
+
     ~BaseEval() {}
 
     void evolve_step(const SumOps<FpType> &ham, State<FpType> &s,
@@ -178,7 +181,7 @@ public:
 	current_time = tm;
 	for (int i = 0; i <= args.nsteps; i++) {
 	    s = s0;
-	    evolve(ham.LL, ham.RR, s, i*dt, args.beta, args.N, syk.fermion_ops());
+	    evolve(ham.LL, ham.RR, s, i*dt, args.beta, syk.fermion_ops());
 	    v[i] = s0 * s;
 	    auto tm = time(nullptr);
 	    logger << "Time step " << i*dt << " done. Time for this step: "
@@ -204,7 +207,7 @@ class Green : public BaseEval<FpType> {
     }
 
     void evolve(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
-		State<FpType> &s, FpType t, FpType beta, int N,
+		State<FpType> &s, FpType t, FpType beta,
 		const std::vector<FermionOp<FpType>> &ops) {
         this->evolve_step(hRR, s, t, 0);
 	this->evolve_step(hLL, s, -t, 0);
@@ -222,15 +225,20 @@ class OTOC : public BaseEval<FpType> {
     }
 
     void evolve(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
-		State<FpType> &s, FpType t, FpType beta, int N,
+		State<FpType> &s, FpType t, FpType beta,
 		const std::vector<FermionOp<FpType>> &ops) {
-       auto op = ops[N-2].LR;
-       s *= op;
-       this->evolve_step(hRR, s, t, beta/4);
-       this->evolve_step(hLL, s, -t, beta/4);
-       s *= op;
-       this->evolve_step(hRR, s, t, beta/4);
-       this->evolve_step(hLL, s, -t, 0);
+	auto N = this->args.N;
+	auto otoc_idx = this->args.otoc_idx;
+	auto op = ops[N-2].LR;
+	if ((otoc_idx >= 0) && (otoc_idx <= (N-2))) {
+	    op = ops[otoc_idx].LR;
+	}
+	s *= op;
+	this->evolve_step(hRR, s, t, beta/4);
+	this->evolve_step(hLL, s, -t, beta/4);
+	s *= op;
+	this->evolve_step(hRR, s, t, beta/4);
+	this->evolve_step(hLL, s, -t, 0);
     }
 
 public:
@@ -250,6 +258,9 @@ class Runner : protected SykArgParser {
 	   << "tmax" << tmax << "nsteps" << nsteps << "krydim" << krylov_dim;
 	if (j_coupling != 1.0) {
 	    ss << "J" << j_coupling;
+	}
+	if (otoc_idx >= 0) {
+	    ss << "otocidx" << otoc_idx;
 	}
 	Eval<float> eval32(*this);
 	Eval<double> eval64(*this);
