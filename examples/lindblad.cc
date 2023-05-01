@@ -225,6 +225,9 @@ int main(int argc, const char *argv[])
 #ifndef REAPERS_NOGPU
 		  << "-GPU"
 #endif
+#ifdef __INTEL_LLVM_COMPILER
+		  << "-INTEL"
+#endif
 		  << "-" GITHASH ", powered by the REAPERS library.\n" << std::endl;
 	Eval eval;
 	return eval.run(argc, argv);

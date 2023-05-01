@@ -10,8 +10,10 @@ OTOC*
 Green*
 syk
 syk-gpu
+syk-intel
 lindblad
 lindblad-gpu
+lindblad-intel
 Log*
 Avg*
 Ent*
@@ -20,3 +22,4 @@ Gndst*
 .gdb_history
 test
 test-gpu
+test-intel

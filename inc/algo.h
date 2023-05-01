@@ -28,7 +28,7 @@ Revision History:
 template<typename Impl>
 class MatrixPower {
     template<typename FpType>
-    using SumOps = typename Impl::SumOps<FpType>;
+    using SumOps = typename Impl::template SumOps<FpType>;
 public:
     // Compute s = exp(-(beta+it)H) * s by expanding to the n-th power.
     template<typename FpType>
@@ -45,9 +45,9 @@ public:
 	using std::swap;
 	// We need two internal buffers for H^k v
 	s.enlarge(3);
-	typename Impl::BufType<FpType> orig = s.buf();
-	typename Impl::BufType<FpType> v1 = s.buf(1); // H^i v
-	typename Impl::BufType<FpType> v2 = s.buf(2); // H^{i+1} v
+	typename Impl::template BufType<FpType> orig = s.buf();
+	typename Impl::template BufType<FpType> v1 = s.buf(1); // H^i v
+	typename Impl::template BufType<FpType> v2 = s.buf(2); // H^{i+1} v
 	complex<FpType> c = 1.0;
 	Impl::copy_vec(dim, v1, orig);
 	for (int i = 0; i < n; i++) {

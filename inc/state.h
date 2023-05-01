@@ -59,7 +59,7 @@ class State {
     // During state evolution we will need multiple internal buffers. To reduce the
     // number of allocation and deallocation calls, we delay the deallocation until
     // user explicitly calls gc().
-    std::vector<typename Impl::VecType<FpType>> bufs;
+    std::vector<typename Impl::template VecType<FpType>> bufs;
 
     void check_state_index(IndexType n) const {
 	if (n >= dim()) {
@@ -124,14 +124,14 @@ public:
 
     // Be careful when calling this function as this returns the raw pointer to the
     // current state vector. You should never save this pointer.
-    typename Impl::BufType<FpType> buf(int i = 0) {
+    typename Impl::template BufType<FpType> buf(int i = 0) {
 	assert(curbuf >= 0);
 	assert(curbuf < num_bufs());
 	assert(num_bufs() >= (i+1));
 	return bufs[(curbuf+i) % num_bufs()].get();
     }
 
-    typename Impl::ConstBufType<FpType> buf(int i = 0) const {
+    typename Impl::template ConstBufType<FpType> buf(int i = 0) const {
 	assert(curbuf >= 0);
 	assert(curbuf < num_bufs());
 	assert(num_bufs() >= (i+1));
@@ -239,11 +239,11 @@ public:
 	return energy;
     }
 
-    typename Impl::ElemConstRefType<FpType> operator[](IndexType i) const {
+    typename Impl::template ElemConstRefType<FpType> operator[](IndexType i) const {
 	return buf()[i];
     }
 
-    typename Impl::ElemRefType<FpType> operator[](IndexType i) {
+    typename Impl::template ElemRefType<FpType> operator[](IndexType i) {
 	return buf()[i];
     }
 
@@ -264,9 +264,9 @@ public:
     State &operator*=(const SumOps<FpType> &ops) {
 	enlarge(2);
 	assert(num_bufs() >= 2);
-	typename Impl::BufType<FpType> v = buf();
+	typename Impl::template BufType<FpType> v = buf();
 	inc_curbuf();
-	typename Impl::BufType<FpType> res = buf();
+	typename Impl::template BufType<FpType> res = buf();
 	Impl::zero_vec(dim(), res);
 	Impl::apply_ops(len, res, ops, v);
 	return *this;
