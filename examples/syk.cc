@@ -41,10 +41,11 @@ struct SykArgParser : ArgParser {
     bool use_mt19937;
     bool regularize;
     bool non_standard_gamma;
+    bool seed_from_time;
     float beta;
     float j_coupling;
-    int otoc_idx;
     float kry_tol;
+    int otoc_idx;
 
 private:
     void parse_hook() {
@@ -67,7 +68,8 @@ private:
 	     " By default, PCG64 is used.")
 	    ("regularize", progopts::bool_switch(&regularize)->default_value(false),
 	     "Generate regularized sparse SYK.")
-	    ("non-standard-gamma", progopts::bool_switch(&non_standard_gamma)->default_value(false),
+	    ("non-standard-gamma",
+	     progopts::bool_switch(&non_standard_gamma)->default_value(false),
 	     "Use the non-standard normalization of gamma matrices {gamma_i, gamma_j}"
 	     " = 2 delta_ij. This is for testing purpose only and should give the exact"
 	     " same simulation results.")
@@ -77,7 +79,12 @@ private:
 	     "Specifies the second fermion index in the OTOC. The default is N-2.")
 	    ("tol", progopts::value<float>(&kry_tol)->default_value(0.0),
 	     "Specifies the tolerance of the Krylov algorithm. The default is"
-	     " machine precision.");
+	     " machine precision.")
+	    ("seed-from-time",
+	     progopts::bool_switch(&seed_from_time)->default_value(false),
+	     "Seed the pRNG using system time. By default, we use std::random_device"
+	     " from the C++ stanfard library. Enable this if your C++ implementation's"
+	     " std::random_device is broken (eg. deterministic).");
     }
 
     bool optcheck_hook() {
@@ -420,10 +427,16 @@ public:
 	if (!parse(argc, argv)) {
 	    return 1;
 	}
+	unsigned int seed = 0;
+	if (seed_from_time) {
+	    seed = time(nullptr);
+	} else {
+	    std::random_device rd;
+	    seed = rd();
+	}
 	if (use_mt19937) {
 	    // The user request for mt19937 as the pRNG. Use it.
-	    std::random_device rd;
-	    std::mt19937 rg(rd());
+	    std::mt19937 rg(seed);
 	    if (want_otoc) {
 		runjob<OTOC>(rg);
 	    }
@@ -431,10 +444,8 @@ public:
 		runjob<Green>(rg);
 	    }
 	} else {
-	    // Seed with a real random value, if available
-	    pcg_extras::seed_seq_from<std::random_device> seed_source;
 	    // Make a random number engine
-	    pcg64 rg(seed_source);
+	    pcg64 rg(seed);
 	    if (want_otoc) {
 		runjob<OTOC>(rg);
 	    }
