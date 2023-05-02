@@ -268,8 +268,13 @@ class Runner : protected SykArgParser {
     template<template<typename> typename Eval, typename RandGen>
     void runjob(RandGen &rg) {
 	std::stringstream ss;
-	ss << "N" << N << "M" << M << "beta" << beta << "k" << sparsity
-	   << (regularize ? "reg" : "") << (non_standard_gamma ? "nsgamma" : "")
+	ss << "N" << N << "M" << M << "beta" << beta;
+	if (sparsity != 0.0) {
+	    ss << "k" << sparsity;
+	} else {
+	    ss << "dense";
+	}
+	ss << (regularize ? "reg" : "") << (non_standard_gamma ? "nsgamma" : "")
 	   << "tmax" << tmax << "nsteps" << nsteps << "krydim" << krylov_dim;
 	if (j_coupling != 1.0) {
 	    ss << "J" << j_coupling;
