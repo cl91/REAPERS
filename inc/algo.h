@@ -252,7 +252,7 @@ public:
 	    // Evaluate Hexp = exp(-(t_imag+it_real)Hfull).
 	    SmallMat<FpType> Hexp(Hfull);
 	    Hexp *= std::complex{-t_imag, -t_real};
-	    Hexp = Hexp.exp();
+	    Hexp = Hexp.exp().eval();
 
 	    // The update will be built from the last m elements of
 	    // the zeroth column of Hexp
