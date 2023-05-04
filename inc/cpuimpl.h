@@ -33,13 +33,35 @@ class HostSumOps {
     template<typename FpType1>
     friend class HostSumOps;
 
-protected:
-    std::vector<SpinOp<FpType>> ops;
-
 public:
     using ComplexScalar = typename SpinOp<FpType>::ComplexScalar;
+    using MatrixType = Eigen::Matrix<std::complex<FpType>,
+				     Eigen::Dynamic, Eigen::Dynamic>;
+    using EigenVals = Eigen::Matrix<FpType, Eigen::Dynamic, 1>;
+    using EigenVecs = MatrixType;
 
-    // We can implicitly convert a spin operator into a HostSumOps with one element
+protected:
+    std::vector<SpinOp<FpType>> ops;
+    mutable MatrixType mat;
+    mutable EigenVals eigenvals;
+    mutable EigenVecs eigenvecs;
+
+    // Release the mutable internal state used for caching the results of the
+    // get_matrix() and related functions. Note this should NOT be marked as
+    // const (despite the fact that it does not modify any non-mutable member),
+    // because we should not call release() in a const member function.
+    // Additionally, any derived class MUST call the parent class release()
+    // function if it has any mutable internal state (and therefore has to
+    // override this function).
+    virtual void release() {
+	// This will delete the underlying arrays for the matrices.
+	mat.resize(0, 0);
+	eigenvals.resize(0, 1);
+	eigenvecs.resize(0, 0);
+    }
+
+public:
+    // We can implicitly convert a spin operator into a HostSumOps with one term
     HostSumOps(const SpinOp<FpType> &op) : ops{op} {}
 
     // Conversion between sum operators of different floating point precision
@@ -58,6 +80,26 @@ public:
 	}
     }
 
+    // It's good idea to mark the base class destructor as virtual (strictly
+    // speaking not necessary, as long as the user never deletes through the
+    // base pointer, but it's a good habit to do so).
+    virtual ~HostSumOps() {}
+
+    // Assignment operator. We must release the internal mutable state.
+    HostSumOps &operator=(const HostSumOps &rhs) {
+	release();
+	ops = rhs.ops;
+	return *this;
+    }
+
+    // Assignment operator. We must release the internal mutable state.
+    HostSumOps &operator=(const SpinOp<FpType> &rhs) {
+	release();
+	ops.clear();
+	ops.emplace_back(rhs);
+	return *this;
+    }
+
     // We don't allow the user to modify the operators using iterators.
     auto begin() const { return std::cbegin(ops); }
     auto end() const { return std::cend(ops); }
@@ -67,6 +109,7 @@ public:
     // list of operators, just add up the coefficients. Otherwise, append the new
     // operator to the list of operators.
     HostSumOps &operator+=(const SpinOp<FpType> &op) {
+	release();
 	for (auto &o : ops) {
 	    if (o.bits == op.bits) {
 		o.coeff += op.coeff;
@@ -79,6 +122,7 @@ public:
 
     // Add another HostSumOps to this one
     HostSumOps &operator+=(const HostSumOps &rhs) {
+	release();
 	for (auto &&o : rhs) {
 	    *this += o;
 	}
@@ -95,18 +139,21 @@ public:
 
     // Multiply the specified operator from the right with this operator
     HostSumOps &operator*=(const HostSumOps &rhs) {
+	release();
 	*this = operator*(rhs);
 	return *this;
     }
 
     // Scalar multiplication
     HostSumOps &operator*=(const ComplexScalar &rhs) {
+	release();
 	*this = operator*(rhs);
 	return *this;
     }
 
     // Scalar "division", defined as scalar multiplication by 1/s
     HostSumOps &operator/=(const ComplexScalar &s) {
+	release();
 	*this = operator*(ComplexScalar{1.0,0.0}/s);
 	return *this;
     }
@@ -136,6 +183,78 @@ public:
     // Scalar multiplication can be done from both directions.
     friend HostSumOps operator*(ComplexScalar s, const HostSumOps &ops) {
 	return ops * s;
+    }
+
+    // Returns true if all operators in the sum are Hermitian.
+    bool is_hermitian() const {
+	for (auto &op : *this) {
+	    if (!op.is_hermitian()) {
+		return false;
+	    }
+	}
+	return true;
+    }
+
+    // Returns the (dense) matrix corresponding to the sum of operators.
+    const MatrixType &get_matrix(int spin_chain_len) const {
+	size_t dim = 1ULL << spin_chain_len;
+	if ((size_t)mat.rows() == dim) {
+	    assert((size_t)mat.cols() == dim);
+	    return mat;
+	}
+	mat = MatrixType::Zero(dim, dim);
+	for (auto &op : ops) {
+	    auto spmat{op.get_sparse_matrix(spin_chain_len)};
+	    auto bitmap{std::get<0>(spmat)};
+	    auto cols{std::get<1>(spmat)};
+	    #pragma omp parallel for
+	    for (size_t i = 0; i < dim; i++) {
+		auto v = bitmap[i] ? -op.coeff : op.coeff;
+		mat(i, cols[i]) += std::complex{v.real(), v.imag()};
+	    }
+	}
+	return mat;
+    }
+
+    using EigenSystem = std::tuple<const EigenVals &, const EigenVecs &>;
+
+    // Returns the eigen system (eigen values and eigen vectors) of the sum
+    // of operators. EigenVals is a column vector of dimension n where n=1<<len.
+    // EigenVecs is a nxn matrix. Here len is the length of the spin chain.
+    // These satisfy EigenVecs * diag(EigenVals) * EigenVecs^dagger = M,
+    // where M is the matrix corresponding to the operator sum.
+    // Note the operator sum must be Hermitian. We assert if it is not.
+    EigenSystem get_eigensystem(int len) const {
+	assert(is_hermitian());
+	if (eigenvals.rows() == (1LL << len)) {
+	    assert(eigenvals.cols() == 1);
+	    assert(eigenvecs.rows() == (1LL << len));
+	    assert(eigenvecs.cols() == (1LL << len));
+	    return {eigenvals, eigenvecs};
+	}
+	Eigen::SelfAdjointEigenSolver<MatrixType> solver(get_matrix(len));
+	if (solver.info() != Eigen::Success) {
+	    ThrowException(RuntimeError, "Eigen", solver.info());
+	}
+	eigenvals = solver.eigenvalues();
+	eigenvecs = solver.eigenvectors();
+	return {eigenvals, eigenvecs};
+    }
+
+    // Compute the matrix exponential using exact diagonalization. Note you
+    // should NOT call this function if you want to compute state evolution
+    // (especially if you want to use Krylov). Call State::evolve() instead.
+    // Here len is the length of the spin chain.
+    MatrixType matexp(ComplexScalar c, int len) const {
+	auto eigensys = get_eigensystem(len);
+	auto eigenvals = std::get<0>(eigensys);
+	auto eigenvecs = std::get<1>(eigensys);
+	auto vexp = eigenvals.unaryExpr([=](FpType v){
+	    FpType re = v * c.real();
+	    FpType im = v * c.imag();
+	    return std::exp(re) * std::complex{std::cos(im), std::sin(im)};
+	});
+	return eigenvecs * vexp.asDiagonal() * eigenvecs.adjoint();
     }
 
     friend std::ostream &operator<<(std::ostream &os, const HostSumOps &s) {
@@ -168,6 +287,15 @@ public:
 	return os;
     }
 };
+
+
+// Add two spin operators together.
+template<typename FpType>
+inline HostSumOps<FpType> operator+(SpinOp<FpType> op0, const SpinOp<FpType> &op1) {
+    HostSumOps res{op0};
+    res += op1;
+    return res;
+}
 
 // Class that implements basic vector operations on the CPU. This is for testing
 // purpose only and is not suitable for realistic calculations.
@@ -338,6 +466,19 @@ public:
     template<typename FpType>
     static FpType vec_norm(VecSizeType<FpType> size, ConstBufType<FpType> v0) {
 	return std::sqrt(vec_prod(size, v0, v0).real());
+    }
+
+    // Compute the matrix multiplication res = mat * vec, where mat is of
+    // type HostSumOps::MatrixType. Here res and vec are assumed to be
+    // different buffers.
+    template<typename FpType>
+    static void mat_mul(VecSizeType<FpType> dim, BufType<FpType> res,
+			const typename HostSumOps<FpType>::MatrixType &mat,
+			ConstBufType<FpType> vec) {
+	using VectorType = Eigen::Matrix<complex<FpType>, Eigen::Dynamic, 1>;
+	Eigen::Map<VectorType> mres(res,dim,1);
+	Eigen::Map<const VectorType> mvec(vec,dim,1);
+	mres = mat * mvec;
     }
 
     // Compute res += ops * vec. res and vec are assumed to be different.

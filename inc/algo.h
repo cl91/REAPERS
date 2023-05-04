@@ -34,11 +34,8 @@ public:
     template<typename FpType>
     static void evolve(State<FpType, Impl> &s, const SumOps<FpType> &ops,
 		       FpType t, FpType beta = 0.0, int n = 1) {
-	if ((t == 0.0) && (beta == 0.0)) {
-	    return;
-	}
 	auto dim = s.dim();
-	auto len = s.spin_length();
+	auto len = s.spin_chain_length();
 	auto norm = s.norm();
 	s *= 1/norm;
 	// For CPUImpl, swap() will resolve to std::swap<std::unique_ptr>.
@@ -58,6 +55,22 @@ public:
 	    swap(v1, v2);
 	}
 	s *= norm;
+    }
+};
+
+// Compute the state evolution using exact diagonalization.
+template<typename Impl>
+class ExactDiagonalization {
+    template<typename FpType>
+    using SumOps = typename Impl::template SumOps<FpType>;
+public:
+    template<typename FpType>
+    static void evolve(State<FpType, Impl> &s, const SumOps<FpType> &ops,
+		       FpType t, FpType beta = 0.0) {
+	s.enlarge(2);
+	auto mexp = ops.matexp(complex<FpType>{-beta,-t}, s.spin_chain_length());
+	Impl::mat_mul(s.dim(), s.buf(1), mexp, s.buf());
+	s.inc_curbuf(1);
     }
 };
 
@@ -149,7 +162,7 @@ class Krylov {
 	assert(k >= 0);
 	assert(m >= (k+1));
 	auto dim = s.dim();
-	auto len = s.spin_length();
+	auto len = s.spin_chain_length();
 	// Populate the internal buffers with Krylov vectors, starting from
 	// the initial vector v[k] = buf(k). This will generate the Krylov
 	// vectors from v[k+1] to v[m-1], as well as the final vector v[m],
@@ -186,9 +199,6 @@ public:
     static void evolve(State<FpType,Impl> &s, const SumOps<FpType> &ops, FpType t_real,
 		       FpType t_imag = 0.0, int krydim = 5,
 		       FpType tol = epsilon<FpType>(), int max_iters = 0) {
-	if ((t_real == 0.0) && (t_imag == 0.0)) {
-	    return;
-	}
 	assert(krydim >= 2);
 	auto dim = s.dim();
 	// We need krydim+1 internal buffers for krydim+1 Krylov vectors.

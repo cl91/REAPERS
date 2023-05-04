@@ -80,6 +80,8 @@ class DevSumOps : public HostSumOps<FpType> {
     // be called after every update to the operator list, so next time
     // GPUImpl::apply_ops can upload a fresh copy of the latest SumOps.
     void release() {
+	// We must call the parent class release() function.
+	HostSumOps<FpType>::release();
 	if (dev_ops) {
 	    assert(!sparse_mat);
 	    cudaFree(dev_ops);
@@ -107,71 +109,6 @@ public:
     DevSumOps(const std::initializer_list<SpinOp<FpType>> &l = {}) :
 	HostSumOps<FpType>(l), dev_ops(nullptr), sparse_mat(nullptr) {}
     ~DevSumOps() { release(); }
-
-    // Assignment operator
-    DevSumOps &operator=(const DevSumOps &rhs) {
-	release();
-	HostSumOps<FpType>::operator=(rhs);
-	return *this;
-    }
-
-    // Add another spin operator to the summed operators.
-    DevSumOps &operator+=(const SpinOp<FpType> &op) {
-	release();
-	HostSumOps<FpType>::operator+=(op);
-	return *this;
-    }
-
-    // Add another DevSumOps to this one
-    DevSumOps &operator+=(const DevSumOps<FpType> &rhs) {
-	release();
-	HostSumOps<FpType>::operator+=(rhs);
-	return *this;
-    }
-
-    // Add the supplied operator and this operator together, without changing this
-    // operator, and return the result.
-    DevSumOps operator+(const SpinOp<FpType> &op) const {
-	return DevSumOps(HostSumOps<FpType>::operator+(op));
-    }
-
-    // Multiply the specified operator from the right with this operator
-    DevSumOps &operator*=(const DevSumOps &rhs) {
-	release();
-	HostSumOps<FpType>::operator*=(rhs);
-	return *this;
-    }
-
-    // Scalar multiplication
-    DevSumOps &operator*=(const complex<FpType> &rhs) {
-	release();
-	HostSumOps<FpType>::operator*=(rhs);
-	return *this;
-    }
-
-    // Scalar "division", defined as scalar multiplication by 1/s
-    DevSumOps &operator/=(const complex<FpType> &s) {
-	release();
-	HostSumOps<FpType>::operator/=(s);
-	return *this;
-    }
-
-    // Multiply the specified operator from the right with this operator (without
-    // changing this operator), and return the result.
-    DevSumOps operator*(const DevSumOps &rhs) const {
-	return DevSumOps(HostSumOps<FpType>::operator*(rhs));
-    }
-
-    // Multiply the specified complex scalar with this operator (without
-    // changing this operator), and return the result.
-    DevSumOps operator*(complex<FpType> rhs) const {
-	return DevSumOps(HostSumOps<FpType>::operator*(rhs));
-    }
-
-    // Scalar multiplication can be done from both directions.
-    friend DevSumOps operator*(complex<FpType> s, const DevSumOps &ops) {
-	return ops * s;
-    }
 
     friend std::ostream &operator<<(std::ostream &os, const DevSumOps &s) {
 	os << static_cast<const HostSumOps<FpType> &>(s) << " devptr " << s.dev_ops;
@@ -363,6 +300,16 @@ public:
     // n = sqrt(<v|v>) = sqrt(v^\dagger \cdot v)
     template<typename FpType>
     static FpType vec_norm(VecSizeType<FpType> size, ConstBufType<FpType> v);
+
+    // Compute the matrix multiplication res = mat * vec, where mat is of
+    // type HostSumOps::MatrixType. Here res and vec are assumed to be
+    // different buffers.
+    template<typename FpType>
+    static void mat_mul(VecSizeType<FpType> dim, BufType<FpType> res,
+			const typename HostSumOps<FpType>::MatrixType &mat,
+			ConstBufType<FpType> vec) {
+	// TODO
+    }
 
     // Compute res = ops * vec. res and vec are assumed to be different.
     template<typename FpType>

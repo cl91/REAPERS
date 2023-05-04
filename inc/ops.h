@@ -115,7 +115,7 @@ constexpr inline bool operator!=(const complex<double> &lhs,
 }
 
 // This class represents a spin operator.
-template<typename FpType>
+template<typename FpType = DefFpType>
 class SpinOp {
 public:
     // Integer type for the spin site index, eg. for spin state |011001>, there are
@@ -359,6 +359,11 @@ public:
 	}
     }
 
+    // Returns true if the operator is hermitian.
+    bool is_hermitian() const {
+	return coefficient().imag() == 0;
+    }
+
     // Returns true if the spin operator is a scalar operator
     DEVHOST bool is_scalar() const {
 	return !bits;
@@ -415,6 +420,152 @@ public:
 	}
 	res = n;
 	return minus ? -coeff : coeff;
+    }
+
+    class BitMap {
+	using Word = u64;
+	static constexpr auto WordBits = sizeof(Word) * 8;
+	std::vector<Word> bits;
+	size_t bit_count;
+	friend class SpinOp;
+	// Duplicate the given bitmap and put the copy right after it, optionally
+	// flipping the bits. For instance, given the following bitmap
+	//     1011
+	//     ^  ^---- Least significant bit
+	//     |
+	//     Most significant bit
+	// if both neg0 and neg1 are false, the duplicated bitmap will be
+	// [MSB]1011`1011[LSB]. If neg0 is true and neg1 is false, the
+	// duplicated bitmap will be [MSB]1011`0100[LSB], etc. Here 1<<n is
+	// the number of bits in the bitmap. For n=0 we simply initialize the
+	// bitmap to {neg0,neg1}. Once the function returns the number of bits
+	// will be 1<<(n+1).
+	void duplicate(bool neg0, bool neg1) {
+	    assert(bit_count < (bits.size() * WordBits));
+	    if (bit_count == 0) {
+		bits[0] = (neg1 << 1) | neg0;
+		bit_count = 2;
+		return;
+	    }
+	    if (bit_count < WordBits) {
+		auto word = bits[0];
+		if (neg0) {
+		    bits[0] ^= (1ULL << bit_count) - 1;
+		}
+		if (neg1) {
+		    word ^= (1ULL << bit_count) - 1;
+		}
+		word <<= bit_count;
+		bits[0] |= word;
+	    } else {
+		size_t word_count = bit_count / WordBits;
+		#pragma omp parallel for
+		for (size_t i = 0; i < word_count; i++) {
+		    bits[i + word_count] = neg1 ? ~bits[i] : bits[i];
+		    if (neg0) {
+			bits[i] = ~bits[i];
+		    }
+		}
+	    }
+	    bit_count <<= 1;
+	}
+	// Only SpinOp can construct BitMap.
+	constexpr BitMap() : bits(1), bit_count{2} {}
+	constexpr BitMap(size_t capacity)
+	    : bits((capacity < WordBits) ? 1 : (capacity/WordBits)), bit_count{0} {}
+    public:
+	// Other classes can access the n-th bit of the bitmap (but not modify).
+	bool operator[](size_t n) const {
+	    size_t word_idx = n / (sizeof(Word) * 8);
+	    size_t rem = n % (sizeof(Word) * 8);
+	    if (word_idx >= bits.size()) {
+		ThrowException(InvalidArgument,
+			       "n", "cannot exceed bitmap size");
+	    }
+	    return bits[word_idx] & (1ULL << rem);
+	}
+	// Allow other classes to display the bitmap.
+	friend std::ostream &operator<<(std::ostream &os, const BitMap &bm) {
+	    for (size_t i = 0; i < bm.bit_count; i++) {
+		if (bm[i]) {
+		    os << "-";
+		} else {
+		    os << "+";
+		}
+		if ((i+1) != bm.bit_count) {
+		    os << " ";
+		}
+	    }
+	    return os;
+	}
+    };
+
+    using ColList = std::vector<StateType>;
+
+private:
+    // Duplicate the given column coordinate list. Each column coordinate
+    // in the original list is bit-wise prepended with col0 left shifted
+    // by n bits. The copied list is prepended with col1 left shifted by n
+    // bits and is placed immediately after the original list. The number
+    // of coordinates is given by 1<<n. If n == 0, cols will be initialized
+    // to {col0, col1}.
+    void duplicate_cols(ColList &cols, int n, StateType col0, StateType col1) const {
+	if (n == 0) {
+	    cols[0] = col0;
+	    cols[1] = col1;
+	    return;
+	}
+	size_t num_coords = 1ULL << n;
+	assert(num_coords <= cols.size());
+	#pragma omp parallel for
+	for (size_t i = 0; i < num_coords; i++) {
+	    cols[i + num_coords] = cols[i] | (col1 << n);
+	    cols[i] |= (col0 << n);
+	}
+    }
+
+public:
+    // Returns the sparse matrix corresponding to the sigma opeartor part
+    // (ie. without the coefficient) of the spin operator, in the form of
+    // a bitmap and the column coordinate list. Since the non-zero element
+    // of id,sx,sy,sz can only be one or minus one, we use a bitmap indicate
+    // whether the non-zero element has a minus sign (ie. true == has minus
+    // sign). Since the row coordinate list is always {0,1,2,...,n} where n
+    // is the Hilbert space dimension, we do not need to compute the row
+    // coordinate list. Here the input parameter len is the spin chain length.
+    std::tuple<BitMap, ColList> get_sparse_matrix(int len) const {
+	assert(len >= 0);
+	// If the length is zero, simply return the identity matrix
+	if (len == 0) {
+	    return {{}, {0,1}};
+	}
+	// Allocate the objects for the COO matrix. There are exactly 1<<len
+	// non-zero elements in the matrix so we know how much space we need.
+	BitMap bm(1ULL << len);
+	ColList cols(1ULL << len);
+	for (int i = 0; i < len; i++) {
+	    switch ((*this)[i]) {
+	    case Sigma::id:
+		bm.duplicate(false, false);
+		duplicate_cols(cols, i, 0, 1);
+		break;
+	    case Sigma::x:
+		bm.duplicate(false, false);
+		duplicate_cols(cols, i, 1, 0);
+		break;
+	    case Sigma::y:
+		bm.duplicate(true, false);
+		duplicate_cols(cols, i, 1, 0);
+		break;
+	    case Sigma::z:
+		bm.duplicate(false, true);
+		duplicate_cols(cols, i, 0, 1);
+		break;
+	    }
+	}
+	assert(bm.bit_count == (1ULL << len));
+	assert(cols.size() == (1ULL << len));
+	return {bm, cols};
     }
 
     friend std::ostream &operator<<(std::ostream &os, const SpinOp &op) {

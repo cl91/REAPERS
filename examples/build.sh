@@ -10,14 +10,14 @@ if [[ $1 == "intel" ]]; then
 fi
 
 GITHASH=$(git show -s --format="%h (%ci)" HEAD)
-#DBGOPTS="-DREAPERS_DEBUG -g"
-DBGOPTS=""
+COMMONOPTS="-std=c++20 -Wall -Wno-maybe-uninitialized -Wno-uninitialized -I/usr/include/eigen3 -I../inc -lboost_program_options"
+DBGOPTS="-DREAPERS_DEBUG -g"
+NDBGOPTS="-DNDEBUG -O3 -ffast-math -mtune=native"
 # You can also specify -DMAX_NUM_FERMIONS=<N> to hard-code the maximum number of fermions.
 # This might make things a little faster, but probably won't matter much.
-OPTS="$DBGOPTS -std=c++20 -Wall -Wno-maybe-uninitialized -Wno-uninitialized -O3 -ffast-math -mtune=native -I/usr/include/eigen3 -I../inc -lboost_program_options"
-NVCC="nvcc -forward-unknown-to-host-compiler $OPTS -march=native -fopenmp -Wno-unknown-pragmas -lcublas -lcurand ../src/krnl.cu"
-CXX="c++ -DREAPERS_NOGPU $OPTS -march=native -fopenmp"
-ICXX="icpx -DREAPERS_NOGPU $OPTS -xhost -fiopenmp -Wno-tautological-constant-compare -Wno-unused-but-set-variable"
+NVCC="nvcc -forward-unknown-to-host-compiler $COMMONOPTS $NDBGOPTS -march=native -fopenmp -Wno-unknown-pragmas -lcublas -lcurand ../src/krnl.cu"
+CXX="c++ -DREAPERS_NOGPU $COMMONOPTS $DBGOPTS -march=native -fopenmp"
+ICXX="icpx -DREAPERS_NOGPU $COMMONOPTS $NDBGOPTS -xhost -fiopenmp -Wno-tautological-constant-compare -Wno-unused-but-set-variable"
 PROJS="syk lindblad"
 
 for i in $PROJS; do

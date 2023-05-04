@@ -45,6 +45,7 @@ Revision History:
 #endif
 
 #include <Eigen/Eigen>
+#include <Eigen/Eigenvalues>
 #include <unsupported/Eigen/MatrixFunctions>
 
 #define _REAPERS_H_
@@ -67,7 +68,7 @@ using complex = std::complex<T>;
 #else
 template<typename T>
 using complex = cuda::std::complex<T>;
-#endif
+#endif	// REAPERS_NOGPU
 
 template<typename FpType>
 auto epsilon = std::numeric_limits<FpType>::epsilon;
@@ -82,7 +83,7 @@ using DefImpl = CPUImpl;
 #include "gpuimpl.h"
 #endif	// REAPERS_NOGPU
 
-template<typename FpType>
+template<typename FpType = DefFpType>
 using SumOps = DefImpl::SumOps<FpType>;
 
 #include "state.h"

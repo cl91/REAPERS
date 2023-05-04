@@ -117,7 +117,7 @@ public:
     }
 
     // Length of the spin chain
-    typename SpinOp<FpType>::IndexType spin_length() const { return len; }
+    typename SpinOp<FpType>::IndexType spin_chain_length() const { return len; }
 
     // Dimension of the Hilbert space.
     IndexType dim() const { return 1 << len; }
@@ -328,6 +328,9 @@ public:
     template<template<typename>typename Algo = DefEvolutionAlgorithm,
 	     typename FpType1, typename FpType2, typename...Args>
     void evolve(const SumOps<FpType> &ham, FpType1 t, FpType2 beta = 0.0, Args&&...args) {
+	if ((t == 0.0) && (beta == 0.0)) {
+	    return;
+	}
 	Algo<Impl>::evolve(*this, ham, static_cast<FpType>(t),
 			   static_cast<FpType>(beta), std::forward<Args>(args)...);
     }

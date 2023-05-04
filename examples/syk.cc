@@ -31,6 +31,10 @@ Revision History:
 
 using namespace REAPERS;
 using namespace REAPERS::Model;
+using namespace REAPERS::EvolutionAlgorithm;
+
+template<typename FpType>
+using MatrixType = typename SumOps<FpType>::MatrixType;
 
 // Argument parser for the SYK simulation program.
 struct SykArgParser : ArgParser {
@@ -42,6 +46,8 @@ struct SykArgParser : ArgParser {
     bool regularize;
     bool non_standard_gamma;
     bool seed_from_time;
+    bool exact_diag;
+    bool exact_diag_trace;
     float beta;
     float j_coupling;
     float kry_tol;
@@ -84,7 +90,14 @@ private:
 	     progopts::bool_switch(&seed_from_time)->default_value(false),
 	     "Seed the pRNG using system time. By default, we use std::random_device"
 	     " from the C++ stanfard library. Enable this if your C++ implementation's"
-	     " std::random_device is broken (eg. deterministic).");
+	     " std::random_device is broken (eg. deterministic).")
+	    ("exact-diag", progopts::bool_switch(&exact_diag)->default_value(false),
+	     "Use exact diagonalization rather than the Krylov method to compute"
+	     " the state evolution exp(-iHt).")
+	    ("exact-diag-trace",
+	     progopts::bool_switch(&exact_diag_trace)->default_value(false),
+	     "Rather than computing the time evolution of random Haar-states,"
+	     " use exact diagonalization to compute the trace of n-point operators.");
     }
 
     bool optcheck_hook() {
@@ -96,6 +109,12 @@ private:
 	if (truncate_fp64 && !(fp32 && fp64)) {
 	    std::cerr << "You cannot specify --truncate-fp64 unless you specified"
 		" both --fp32 and --fp64." << std::endl;
+	    return false;
+	}
+
+	if (exact_diag && exact_diag_trace) {
+	    std::cerr << "You cannot specify both --exact-diag and --exact-diag-trace."
+		      << std::endl;
 	    return false;
 	}
 
@@ -152,6 +171,10 @@ class BaseEval {
     virtual void evolve(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
 			State<FpType> &s, FpType t, FpType beta,
 			const std::vector<FermionOp<FpType>> &ops) = 0;
+    virtual complex<FpType> evolve_trace(const SumOps<FpType> &hLL,
+					 const SumOps<FpType> &hRR,
+					 const MatrixType<FpType> expmbH, FpType t,
+					 const std::vector<FermionOp<FpType>> &ops) = 0;
 
 protected:
     const SykArgParser &args;
@@ -160,7 +183,9 @@ protected:
 
     void evolve_step(const SumOps<FpType> &ham, State<FpType> &s,
 		     FpType t, FpType beta) {
-	if (args.kry_tol != 0.0) {
+	if (args.exact_diag) {
+	    s.template evolve<ExactDiagonalization>(ham, t, beta);
+	} else if (args.kry_tol != 0.0) {
 	    s.evolve(ham, t, beta, args.krylov_dim, (FpType)args.kry_tol);
 	} else {
 	    s.evolve(ham, t, beta, args.krylov_dim);
@@ -172,38 +197,60 @@ public:
 
     BaseEval(const char *name, const SykArgParser &args) : args(args), name(name) {}
 
-    // Evaluate the n-point function from 0 to t_max. The quantity computed
-    // is the inner product of s0 and s, where s0 is the result of pre_evolve()
-    // applied to a random state, and s is the result of evolve() applied to
-    // s0. The output is normalized by dividing <s0|s0>. Note that before
-    // calling this function you must set s0 to a random state, and the state
-    // s0 is modified during the call so if you need the original initial
-    // state, you need to make a copy of it before calling this function.
-    // This is to minimize memory allocation overhead. Results will be written
-    // to vector v as well as file outf, and accumulated into sum.
-    void eval(const SYK<FpType> &syk, const HamOp<FpType> &ham, State<FpType> &s0,
-	      State<FpType> &s, std::vector<complex<FpType>> &v,
+    // Evaluate the n-point function from 0 to t_max. In the case where exact_diag_trace
+    // is false (the default), we compute the inner product of s0 and s, where
+    // s0 is the result of pre_evolve() applied to a random state, and s is the
+    // result of evolve() applied to s0. Note that in this case, before calling
+    // this function you must set s0 to a random state, and the state s0 is
+    // modified during the call so if you need the original initial state, you
+    // need to make a copy of it before calling this function. This is to minimize
+    // memory allocation overhead. If exact_diag_trace is set to true, this function
+    // computes exp(-beta H/4) as a matrix and then calls evolve_trace(), which
+    // the child classes will override to compute the final n-point function by
+    // tracing over the n-point operator. In both cases results will be written
+    // to vector v (after normalizing them by dividing by v[0]) as well as file
+    // outf, and accumulated into sum.
+    void eval(const SYK<FpType> &syk, const HamOp<FpType> &ham, State<FpType> *s0,
+	      State<FpType> *s, std::vector<complex<FpType>> &v,
 	      std::ofstream &outf, std::vector<complex<FpType>> &sum,
 	      Logger &logger) {
 	auto start_time = time(nullptr);
 	auto current_time = start_time;
 	logger << "Running fp" << sizeof(FpType)*8 << " calculation." << endl;
 	FpType dt = args.tmax / args.nsteps;
-	pre_evolve(ham.LL, s0, args.beta);
-	s0.gc();
-	auto tm = time(nullptr);
-	logger << "Pre-evolve done. Time spent: " << tm - current_time << "s." << endl;
-	current_time = tm;
-	for (int i = 0; i <= args.nsteps; i++) {
-	    s = s0;
-	    evolve(ham.LL, ham.RR, s, i*dt, args.beta, syk.fermion_ops());
-	    v[i] = s0 * s;
+	if (args.exact_diag_trace) {
+	    assert(s0 == nullptr);
+	    assert(s == nullptr);
+	    auto expmbH = ham.LL.matexp({-args.beta,0}, args.N/2-1);
+	    for (int i = 0; i <= args.nsteps; i++) {
+		v[i] = evolve_trace(ham.LL, ham.RR, expmbH, i*dt, syk.fermion_ops());
+		auto tm = time(nullptr);
+		logger << "Time step " << i*dt << " done. Time for this step: "
+		       << tm - current_time << "s"
+		       << ". Total runtime so far for this disorder: "
+		       << tm - start_time << "s." << endl;
+		current_time = tm;
+	    }
+	} else {
+	    assert(s0 != nullptr);
+	    assert(s != nullptr);
+	    pre_evolve(ham.LL, *s0, args.beta);
+	    s0->gc();
 	    auto tm = time(nullptr);
-	    logger << "Time step " << i*dt << " done. Time for this step: "
-		   << tm - current_time << "s"
-		   << ". Total runtime so far for this disorder: "
-		   << tm - start_time << "s." << endl;
+	    logger << "Pre-evolve done. Time spent: "
+		   << tm - current_time << "s." << endl;
 	    current_time = tm;
+	    for (int i = 0; i <= args.nsteps; i++) {
+		*s = *s0;
+		evolve(ham.LL, ham.RR, *s, i*dt, args.beta, syk.fermion_ops());
+		v[i] = (*s0) * (*s);
+		auto tm = time(nullptr);
+		logger << "Time step " << i*dt << " done. Time for this step: "
+		       << tm - current_time << "s"
+		       << ". Total runtime so far for this disorder: "
+		       << tm - start_time << "s." << endl;
+		current_time = tm;
+	    }
 	}
 	auto v0 = v[0];
 	for (int i = 0; i <= args.nsteps; i++) {
@@ -226,6 +273,16 @@ class Green : public BaseEval<FpType> {
 		const std::vector<FermionOp<FpType>> &ops) {
         this->evolve_step(hRR, s, t, 0);
 	this->evolve_step(hLL, s, -t, 0);
+    }
+
+    complex<FpType> evolve_trace(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
+				 const MatrixType<FpType> expmbH, FpType t,
+				 const std::vector<FermionOp<FpType>> &ops) {
+	auto len = this->args.N/2-1;
+	auto m0 = hRR.matexp({0, -t}, len);
+	auto m1 = hLL.matexp({0, t}, len);
+	auto tr = (m1 * m0 * expmbH).trace();
+	return {tr.real(), tr.imag()};
     }
 
 public:
@@ -256,6 +313,23 @@ class OTOC : public BaseEval<FpType> {
 	this->evolve_step(hLL, s, -t, 0);
     }
 
+    complex<FpType> evolve_trace(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
+				 const MatrixType<FpType> expmbH, FpType t,
+				 const std::vector<FermionOp<FpType>> &ops) {
+	auto N = this->args.N;
+	auto otoc_idx = this->args.otoc_idx;
+	SumOps<FpType> op(ops[N-2].LR);
+	if ((otoc_idx >= 0) && (otoc_idx <= (N-2))) {
+	    op = ops[otoc_idx].LR;
+	}
+	auto len = N/2-1;
+	auto m0 = hRR.matexp({0, -t}, len);
+	auto m1 = hLL.matexp({0, t}, len);
+	auto m2 = op.get_matrix(len);
+	auto tr = (m1 * m0 * m2 * m1 * m0 * m2 * expmbH).trace();
+	return {tr.real(), tr.imag()};
+    }
+
 public:
     OTOC(const SykArgParser &args) : BaseEval<FpType>("OTOC", args) {}
 };
@@ -275,15 +349,24 @@ class Runner : protected SykArgParser {
 	    ss << "dense";
 	}
 	ss << (regularize ? "reg" : "") << (non_standard_gamma ? "nsgamma" : "")
-	   << "tmax" << tmax << "nsteps" << nsteps << "krydim" << krylov_dim;
+	   << "tmax" << tmax << "nsteps" << nsteps;
+	if (!exact_diag && !exact_diag_trace) {
+	    ss << "krydim" << krylov_dim;
+	    if (kry_tol != 0.0) {
+		ss << "krytol" << kry_tol;
+	    }
+	}
 	if (j_coupling != 1.0) {
 	    ss << "J" << j_coupling;
 	}
 	if (otoc_idx >= 0) {
 	    ss << "otocidx" << otoc_idx;
 	}
-	if (kry_tol != 0.0) {
-	    ss << "tol" << kry_tol;
+	if (exact_diag) {
+	    ss << "ed";
+	}
+	if (exact_diag_trace) {
+	    ss << "trace";
 	}
 	Eval<float> eval32(*this);
 	Eval<double> eval64(*this);
@@ -340,14 +423,24 @@ class Runner : protected SykArgParser {
 	       << (regularize ? " regularized" : "")
 	       << " tmax " << tmax << " nsteps " << nsteps
 	       << " krydim " << krylov_dim << " "
-	       << (use_mt19937 ? "MT19937" : "PCG64") << endl;
+	       << (use_mt19937 ? "MT19937" : "PCG64")
+	       << (exact_diag ? "exact diag" : "")
+	       << (exact_diag_trace ? "exact diag trace" : "")
+	       << "J" << j_coupling;
+	if (otoc_idx >= 0) {
+	    logger << "otoc index" << otoc_idx;
+	}
+	if (kry_tol != 0.0) {
+	    logger << "krylov tolerance" << kry_tol;
+	}
+	logger << endl;
 	std::unique_ptr<State<float>> init32, s32;
 	std::unique_ptr<State<double>> init64, s64;
-	if (fp32) {
+	if (fp32 && !exact_diag_trace) {
 	    init32 = std::make_unique<State<float>>(N/2-1);
 	    s32 = std::make_unique<State<float>>(N/2-1);
 	}
-	if (fp64) {
+	if (fp64 && !exact_diag_trace) {
 	    init64 = std::make_unique<State<double>>(N/2-1);
 	    s64 = std::make_unique<State<double>>(N/2-1);
 	}
@@ -359,10 +452,14 @@ class Runner : protected SykArgParser {
 	for (int u = 0; u < M; u++) {
 	    logger << "Computing disorder " << u << endl;
 	    if (!fp32 || truncate_fp64) {
-		init64->random_state();
+		if (!exact_diag_trace) {
+		    init64->random_state();
+		}
 		ham64 = syk64.gen_ham(rg, regularize);
 	    } else {
-		init32->random_state();
+		if (!exact_diag_trace) {
+		    init32->random_state();
+		}
 		ham32 = syk32.gen_ham(rg, regularize);
 	    }
 	    if (dump_ham) {
@@ -383,10 +480,12 @@ class Runner : protected SykArgParser {
 		// truncating fp64 into fp32. If user specified to truncate,
 		// do the truncation now.
 		if (fp64 && truncate_fp64) {
-		    *init32 = *init64;
+		    if (!exact_diag_trace) {
+			*init32 = *init64;
+		    }
 		    ham32 = ham64;
 		}
-		eval32.eval(syk32, ham32, *init32, *s32, v32,
+		eval32.eval(syk32, ham32, init32.get(), s32.get(), v32,
 			    outf32, sum32, logger);
 	    }
 	    if (fp64) {
@@ -394,10 +493,12 @@ class Runner : protected SykArgParser {
 		// --truncate-fp64, promote the fp32 Hamiltonian and initial states
 		// to fp64 instead.
 		if (fp32 && !truncate_fp64) {
-		    *init64 = *init32;
+		    if (!exact_diag_trace) {
+			*init64 = *init32;
+		    }
 		    ham64 = ham32;
 		}
-		eval64.eval(syk64, ham64, *init64, *s64, v64,
+		eval64.eval(syk64, ham64, init64.get(), s64.get(), v64,
 			    outf64, sum64, logger);
 	    }
 	    if (fp32 && fp64) {
