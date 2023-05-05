@@ -145,9 +145,9 @@ private:
     };
 
     // Compute the "carry-over" minus sign that results from multiplying two sigma
-    // matrices. There are only three cases here:
+    // matrices. There are only four cases here:
     //
-    //   sz . sx = -sy,  sy . sx = -sz,  sz . sy = -sx
+    //   sz.sx = -sy,  sy.sx = -sz,  sy.sy = -id,  sz.sy = -sx
     //
     // When we multiply two spin operators we must take care of these minus signs.
     constexpr static bool prod_has_minus(Sigma op0, Sigma op1) {
@@ -155,6 +155,7 @@ private:
 	case 0b1001:	// sz . sx
 	case 0b1011:	// sz . sy
 	case 0b1101:	// sy . sx
+	case 0b1111:	// sy . sy
 	    return true;
 	default:
 	    return false;
@@ -530,8 +531,8 @@ public:
     // a bitmap and the column coordinate list. Since the non-zero element
     // of id,sx,sy,sz can only be one or minus one, we use a bitmap indicate
     // whether the non-zero element has a minus sign (ie. true == has minus
-    // sign). Since the row coordinate list is always {0,1,2,...,n} where n
-    // is the Hilbert space dimension, we do not need to compute the row
+    // sign). Since the row coordinate list is always {0,1,2,...,n-1} where
+    // n is the Hilbert space dimension, we do not need to compute the row
     // coordinate list. Here the input parameter len is the spin chain length.
     std::tuple<BitMap, ColList> get_sparse_matrix(int len) const {
 	assert(len >= 0);
