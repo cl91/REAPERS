@@ -299,10 +299,9 @@ inline HostSumOps<FpType> operator+(SpinOp<FpType> op0, const SpinOp<FpType> &op
 
 // Class that implements basic vector operations on the CPU. This is for testing
 // purpose only and is not suitable for realistic calculations.
-// Note: we cannot make this a template because in GPUImpl the class has static
-// members that can only be initialized once (and we must follow GPUImpl because
-// the State template takes Impl as a template parameter). In terms of design
-// patterns this is a so-called 'singleton' class.
+// Note: we cannot make this a template because this class has static members
+// that can only be initialized once. In terms of design patterns this is a
+// so-called 'singleton' class.
 class CPUImpl {
     template<typename FpType>
     class HostVec {
@@ -326,6 +325,15 @@ class CPUImpl {
 	}
 	size_t size() const { return dim; }
     };
+
+    class Context {
+	friend class CPUImpl;
+	std::random_device rd;
+	std::mt19937 randgen;
+	Context() : randgen(rd()) {}
+    };
+
+    inline static Context ctx;
 
 public:
     template<typename FpType>
@@ -355,12 +363,10 @@ public:
     // Initialize the vector to a Haar random state.
     template<typename FpType>
     static void init_random(VecSizeType<FpType> size, BufType<FpType> v0) {
-	std::random_device rd;
-	std::mt19937 gen(rd());
 	std::normal_distribution<FpType> norm(0.0, 1.0);
 	#pragma omp parallel for
 	for (VecSizeType<FpType> i = 0; i < size; i++) {
-	    v0[i] = ComplexScalar<FpType>{norm(gen), norm(gen)};
+	    v0[i] = ComplexScalar<FpType>{norm(ctx.randgen), norm(ctx.randgen)};
 	}
 	FpType s = 1.0/vec_norm(size, v0);
 	scale_vec(size, v0, s);

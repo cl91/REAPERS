@@ -171,7 +171,6 @@ class GPUImpl {
 	friend class GPUImpl;
 	cublasHandle_t hcublas;
 	curandGenerator_t randgen;
-    public:
 	GPUContext() {
 	    CUBLAS_CALL(cublasCreate(&hcublas));
 	    CURAND_CALL(curandCreateGenerator(&randgen, CURAND_RNG_PSEUDO_DEFAULT));
