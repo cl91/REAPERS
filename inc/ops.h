@@ -328,6 +328,14 @@ public:
 	return SpinOp((minus ? -coeff : coeff) * op1.coeff, bits ^ op1.bits);
     }
 
+    bool operator==(const SpinOp &other) const {
+	return (bits == other.bits) && (coeff == other.coeff);
+    }
+
+    bool operator!=(const SpinOp &other) const {
+	return !operator==(other);
+    }
+
     // Returns an iterator at the zeroth spin site
     Iterator begin() const { return Iterator(this, 0); }
 

@@ -63,14 +63,14 @@ using DefFpType = float;
 #endif
 
 #ifdef REAPERS_NOGPU
-template<typename T>
-using complex = std::complex<T>;
+template<typename FpType = DefFpType>
+using complex = std::complex<FpType>;
 #else
-template<typename T>
-using complex = cuda::std::complex<T>;
+template<typename FpType = DefFpType>
+using complex = cuda::std::complex<FpType>;
 #endif	// REAPERS_NOGPU
 
-template<typename FpType>
+template<typename FpType = DefFpType>
 auto epsilon = std::numeric_limits<FpType>::epsilon;
 
 #include "except.h"
