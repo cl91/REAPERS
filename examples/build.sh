@@ -18,7 +18,7 @@ NDBGOPTS="-DNDEBUG -O3 -ffast-math -mtune=native"
 NVCC="nvcc -forward-unknown-to-host-compiler $COMMONOPTS $NDBGOPTS -march=native -fopenmp -Wno-unknown-pragmas -lcublas -lcurand ../src/krnl.cu"
 CXX="c++ -DREAPERS_NOGPU $COMMONOPTS $DBGOPTS -march=native -fopenmp"
 ICXX="icpx -DREAPERS_NOGPU $COMMONOPTS $NDBGOPTS -xhost -fiopenmp -Wno-tautological-constant-compare -Wno-unused-but-set-variable"
-PROJS="syk lindblad"
+PROJS="simple-syk-exdiag simple-syk-krylov syk lindblad"
 
 for i in $PROJS; do
     if (( $GPU )); then
@@ -26,6 +26,6 @@ for i in $PROJS; do
     elif (( $INTEL )); then
 	$ICXX -DGITHASH="\"$GITHASH\"" $i.cc  -o $i-intel
     else
-	$CXX -DGITHASH="\"$GITHASH\"" $i.cc -o $i
+	$CXX -DGITHASH="\"$GITHASH\"" $i.cc -o $i-debug
     fi
 done

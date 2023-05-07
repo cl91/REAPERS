@@ -281,8 +281,7 @@ class Green : public BaseEval<FpType> {
 	auto len = this->args.N/2-1;
 	auto m0 = hRR.matexp({0, -t}, len);
 	auto m1 = hLL.matexp({0, t}, len);
-	auto tr = (m1 * m0 * expmbH).trace();
-	return {tr.real(), tr.imag()};
+	return (m1 * m0 * expmbH).trace();
     }
 
 public:
@@ -326,8 +325,7 @@ class OTOC : public BaseEval<FpType> {
 	auto m0 = hRR.matexp({0, -t}, len);
 	auto m1 = hLL.matexp({0, t}, len);
 	auto m2 = op.get_matrix(len);
-	auto tr = (m1 * m0 * m2 * m1 * m0 * m2 * expmbH).trace();
-	return {tr.real(), tr.imag()};
+	return (m1 * m0 * m2 * m1 * m0 * m2 * expmbH).trace();
     }
 
 public:
@@ -422,16 +420,16 @@ class Runner : protected SykArgParser {
 	       << " M " << M << " beta " << beta << " k " << sparsity
 	       << (regularize ? " regularized" : "")
 	       << " tmax " << tmax << " nsteps " << nsteps
-	       << " krydim " << krylov_dim << " "
-	       << (use_mt19937 ? "MT19937" : "PCG64")
-	       << (exact_diag ? "exact diag" : "")
-	       << (exact_diag_trace ? "exact diag trace" : "")
-	       << "J" << j_coupling;
+	       << " krydim " << krylov_dim
+	       << (use_mt19937 ? " MT19937" : " PCG64")
+	       << (exact_diag ? " exact diag" : "")
+	       << (exact_diag_trace ? " exact diag trace" : "")
+	       << " J" << j_coupling;
 	if (otoc_idx >= 0) {
-	    logger << "otoc index" << otoc_idx;
+	    logger << " otoc index " << otoc_idx;
 	}
 	if (kry_tol != 0.0) {
-	    logger << "krylov tolerance" << kry_tol;
+	    logger << " krylov tolerance " << kry_tol;
 	}
 	logger << endl;
 	std::unique_ptr<State<float>> init32, s32;

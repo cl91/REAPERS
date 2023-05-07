@@ -24,7 +24,7 @@ Revision History:
 #include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
 #endif
 
-template<typename FpType>
+template<typename FpType = DefFpType>
 class SYK {
     int N;
     FpType sp;

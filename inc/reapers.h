@@ -86,6 +86,23 @@ using DefImpl = CPUImpl;
 template<typename FpType = DefFpType>
 using SumOps = DefImpl::SumOps<FpType>;
 
+// Define a helper function to convert a SpinOp to its matrix form
+template<typename FpType, typename T>
+typename SumOps<FpType>::MatrixType get_matrix(const T &op, int len);
+
+template<typename FpType>
+inline typename SumOps<FpType>::MatrixType get_matrix(const SpinOp<FpType> &op,
+						      int len) {
+    SumOps<FpType> ops(op);
+    return ops.get_matrix(len);
+}
+
+template<typename FpType>
+inline typename SumOps<FpType>::MatrixType get_matrix(const SumOps<FpType> &ops,
+						      int len) {
+    return ops.get_matrix(len);
+}
+
 #include "state.h"
 
 #ifdef REAPERS_USE_PARITY_BLOCKS
