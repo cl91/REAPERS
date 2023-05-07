@@ -205,8 +205,8 @@ public:
 	mat = MatrixType::Zero(dim, dim);
 	for (auto &op : ops) {
 	    auto spmat{op.get_sparse_matrix(spin_chain_len)};
-	    auto bitmap{std::get<0>(spmat)};
-	    auto cols{std::get<1>(spmat)};
+	    const auto &bitmap{std::get<0>(spmat)};
+	    const auto &cols{std::get<1>(spmat)};
 	    #pragma omp parallel for
 	    for (size_t i = 0; i < dim; i++) {
 		auto v = bitmap[i] ? -op.coeff : op.coeff;
@@ -246,15 +246,22 @@ public:
     // (especially if you want to use Krylov). Call State::evolve() instead.
     // Here len is the length of the spin chain.
     MatrixType matexp(ComplexScalar c, int len) const {
-	auto eigensys = get_eigensystem(len);
-	auto eigenvals = std::get<0>(eigensys);
-	auto eigenvecs = std::get<1>(eigensys);
-	auto vexp = eigenvals.unaryExpr([=](FpType v){
+	EigenSystem eigensys = get_eigensystem(len);
+	const EigenVals &eigenvals = std::get<0>(eigensys);
+	assert(eigenvals.rows() == (1LL << len));
+	assert(eigenvals.cols() == 1);
+	const EigenVecs &eigenvecs = std::get<1>(eigensys);
+	assert(eigenvecs.rows() == (1LL << len));
+	assert(eigenvecs.cols() == (1LL << len));
+	using ComplexVector = Eigen::Matrix<std::complex<FpType>,
+	    Eigen::Dynamic, 1>;
+	ComplexVector vexp = eigenvals.unaryExpr([=](FpType v){
 	    FpType re = v * c.real();
 	    FpType im = v * c.imag();
 	    return std::exp(re) * std::complex{std::cos(im), std::sin(im)};
 	});
-	return eigenvecs * vexp.asDiagonal() * eigenvecs.adjoint();
+	MatrixType vexpevd = vexp.asDiagonal() * eigenvecs.adjoint();
+	return eigenvecs * vexpevd;
     }
 
     friend std::ostream &operator<<(std::ostream &os, const HostSumOps &s) {

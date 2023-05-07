@@ -68,7 +68,7 @@ public:
     static void evolve(State<FpType, Impl> &s, const SumOps<FpType> &ops,
 		       FpType t, FpType beta = 0.0) {
 	s.enlarge(2);
-	auto mexp = ops.matexp(complex<FpType>{-beta,-t}, s.spin_chain_length());
+	auto mexp = ops.matexp({-beta,-t}, s.spin_chain_length());
 	Impl::mat_mul(s.dim(), s.buf(1), mexp, s.buf());
 	s.inc_curbuf(1);
     }
@@ -260,9 +260,8 @@ public:
 	    }
 
 	    // Evaluate Hexp = exp(-(t_imag+it_real)Hfull).
-	    SmallMat<FpType> Hexp(Hfull);
-	    Hexp *= std::complex{-t_imag, -t_real};
-	    Hexp = Hexp.exp().eval();
+	    SmallMat<FpType> tHfull = std::complex{-t_imag,-t_real} * Hfull;
+	    SmallMat<FpType> Hexp = tHfull.exp();
 
 	    // The update will be built from the last m elements of
 	    // the zeroth column of Hexp
@@ -273,9 +272,8 @@ public:
 
 	    // Update the final answer vector, buf(krydim+1) += beta0*V*Hexp0
 	    for (int i = 0; i < m; i++) {
-		auto c = beta0 * Hexp0(i);
-		Impl::add_vec(dim, s.buf(krydim+1),
-			      complex<FpType>{c.real(), c.imag()}, s.buf(i));
+		std::complex<FpType> c = beta0 * Hexp0(i);
+		Impl::add_vec(dim, s.buf(krydim+1), {c.real(),c.imag()}, s.buf(i));
 	    }
 
 	    // Compute the relative norm of the update ||u||/beta0.
