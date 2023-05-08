@@ -114,5 +114,5 @@ public:
     }
 };
 
-template<typename FpType>
+template<typename FpType = DefFpType>
 using HamOp = SumOps<FpType>;

@@ -5,9 +5,9 @@
 #include <reapers.h>
 
 using namespace REAPERS;
-using MatrixType = SumOps<>::MatrixType;
-using EigenVals = SumOps<>::EigenVals;
-using EigenVecs = SumOps<>::EigenVecs;
+using MatrixType = HostSumOps<>::MatrixType;
+using EigenVals = HostSumOps<>::EigenVals;
+using EigenVecs = HostSumOps<>::EigenVecs;
 
 auto i = complex<>{0,1};
 auto id = SpinOp<>::identity();

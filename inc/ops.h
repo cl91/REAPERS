@@ -347,6 +347,11 @@ public:
 	return Sigma { u8((bits >> (SPIN_SHIFT*n)) & SPIN_MASK) };
     }
 
+    // Returns the internal bit-string representation of the spin operator
+    ReprType get_bit_string() const {
+	return bits;
+    }
+
     // Returns the coefficient of the spin operator. In other words, for spin operator
     // S = c sigma_x(0).sigma_y(1).sigma_x(2)...sigma_x(n) we return c. Note here we
     // use the standard definition of the sigma_y matrix, which includes the i, ie.

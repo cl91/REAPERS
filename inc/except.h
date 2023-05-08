@@ -41,7 +41,7 @@ protected:
 public:
     Exception(const char *file, int line, const char *func) {
 	std::stringstream ss;
-	ss << file << ":" << line << "!" << func << "(): ";
+	ss << file << ":" << line << "@" << func << "(): ";
 	msg = ss.str();
     }
 

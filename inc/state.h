@@ -251,12 +251,14 @@ public:
     // version below does not cover the non-template version (this is similar
     // to the copy-ctor case).
     State &operator=(const State &st) {
+	assert(dim() == st.dim());
 	Impl::copy_vec(dim(), buf(), st.buf());
 	return *this;
     }
 
     template<typename FpType1>
     State &operator=(const State<FpType1,Impl> &st) {
+	assert(dim() == st.dim());
 	Impl::copy_vec(dim(), buf(), st.buf());
 	return *this;
     }
