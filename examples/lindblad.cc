@@ -9,7 +9,11 @@ Module Name:
 Abstract:
 
     This module file contains the implementation of the Monte Carlo algorithm
-    for computing the entanglement entropy of the SYK model.
+    for computing the entanglement entropy of the SYK model. It is placed here
+    due to publication requirement of having a single repo for the code of our
+    paper [1] and is not designed to be readable by any stretch of the word.
+
+    [1] [INSERT-INFO-WHEN-PUBLISHED]
 
 Revision History:
 
@@ -30,11 +34,14 @@ Revision History:
 
 using namespace REAPERS;
 using namespace REAPERS::Model;
+template<typename FpType>
+using MatrixType = typename SumOps<FpType>::MatrixType;
 
 // Evaluator class for the entanglement entropy of the Lindblad SYK.
 class Eval : protected ArgParser {
     bool gndst;
     bool use_krylov;
+    bool trace;
     int matpow;
     int m;
     float dt;
@@ -58,7 +65,10 @@ class Eval : protected ArgParser {
 	    ("use-krylov", progopts::bool_switch(&use_krylov)->default_value(false),
 	     "Use the Krylov algorithm for state evolution, instead of expanding the"
 	     " matrix exponential using Taylor series. This is disabled by default."
-	     " When dt is large you should enable it.");
+	     " When dt is large you should enable it.")
+	    ("trace", progopts::bool_switch(&trace)->default_value(false),
+	     "When computing the purity, use the full trace definition rather than"
+	     " the inner product of initial and final state.");
     }
 
     bool optcheck_hook() {
@@ -146,10 +156,80 @@ class Eval : protected ArgParser {
 	}
     }
 
+    template<typename FpType, typename RandGen>
+    void step_trace(MatrixType<FpType> &mat, const MatrixType<FpType> &expmat,
+		    const std::vector<MatrixType<FpType>> &ops,
+		    RandGen &rg, float mu, float dt) {
+	std::uniform_real_distribution<FpType> unif_real(0,1);
+	std::uniform_int_distribution<int> unif_int(0,N-1);
+	FpType p = 1 - std::exp(-N*mu*dt/2);
+	FpType eps = unif_real(rg);
+	if (p < eps) {
+	    mat = expmat * mat;
+	} else {
+            mat = ops[unif_int(rg)] * mat;
+	}
+    }
+
+    // Simulate one disorder realization, using the trace definition
+    template<typename FpType, typename RandGen>
+	void runone_trace(const SYK<FpType> &syk, RandGen &rg, std::ofstream &outf,
+			  const std::vector<FpType> &tarray,
+			  std::vector<FpType> &entropy) {
+	auto N = syk.num_fermions();
+	ssize_t dim = 1LL << (N/2);
+	auto ham = syk.gen_ham(rg);
+	std::vector<MatrixType<FpType>> fermion_ops(N);
+	for (int i = 0; i < N; i++) {
+	    fermion_ops[i] = get_matrix(syk.fermion_ops(i), N/2);
+	}
+	// Compute the matrix exp(+/-iH*dt) using exact diagonalization.
+	MatrixType<FpType> expfwd = ham.matexp({0, -dt}, N/2);
+	MatrixType<FpType> expbac = ham.matexp({0, dt}, N/2);
+	for (size_t u = 0; u < tarray.size(); u++) {
+	    auto T = tarray[u];
+	    if (verbose) {
+		std::cout << "Computing time point " << T << std::endl;
+	    }
+	    // Subdivide T into segments of dt and compute the purity
+	    int nseg = (int)(T/dt);
+	    FpType purity = 0.0;
+	    // Compute m quantum trajectories
+	    for (int i = 0; i < m; i++) {
+		MatrixType<FpType> mat = MatrixType<FpType>::Identity(dim,dim);
+		// Compute the forward evolution
+		for (int j = 0; j < nseg; j++) {
+		    step_trace<FpType>(mat, expfwd, fermion_ops, rg, mu, dt);
+		}
+		// Starting from the result of the forward evolution,
+		// compute the backward evolution
+		for (int j = 0; j < nseg; j++) {
+		    step_trace<FpType>(mat, expbac, fermion_ops, rg, mu, dt);
+		}
+		// Find the overlap between the final and the initial state
+		FpType tr = abs(mat.trace());
+		FpType overlap = tr * tr / (dim*dim);
+		purity += overlap;
+		if (verbose && !(i % 128)) {
+		    std::cout << "Traj " << i << " done." << std::endl;
+		}
+		outf << T << " " << overlap << std::endl;
+	    }
+	    // Compute the entanglement entropy
+	    purity /= m;
+	    entropy[u] = -std::log(purity)*2/N;
+	    if (verbose) {
+		std::cout << "T = " << T << ", entropy = " << entropy[u] << std::endl;
+	    }
+	}
+    }
+
     template <typename FpType>
     void runall() {
 	std::stringstream ss;
-	if (gndst) {
+	if (trace) {
+	    ss << "Trace";
+	} else if (gndst) {
 	    ss << "Gndst";
 	} else {
 	    ss << "Rndst";
@@ -157,10 +237,12 @@ class Eval : protected ArgParser {
 	ss << "N" << N << "M" << M << "dt" << dt << "mu" << mu << "m" << m
 	   << "k" << sparsity << "t0" << t0 << "tmax" << tmax
 	   << "nsteps" << nsteps << "fp" << sizeof(FpType) * 8;
-	if (use_krylov) {
-	    ss << "krydim" << krylov_dim;
-	} else {
-	    ss << "matpow" << matpow;
+	if (!trace) {
+	    if (use_krylov) {
+		ss << "krydim" << krylov_dim;
+	    } else {
+		ss << "matpow" << matpow;
+	    }
 	}
 	std::ofstream outf;
 	outf.rdbuf()->pubsetbuf(0, 0);
@@ -188,7 +270,11 @@ class Eval : protected ArgParser {
 	std::vector<FpType> entropy_sum(tarray.size());
 	for (int i = 0; i < M; i++) {
 	    std::vector<FpType> entropy(tarray.size());
-	    runone(syk, rg, outf, tarray, entropy);
+	    if (trace) {
+		runone_trace(syk, rg, outf, tarray, entropy);
+	    } else {
+		runone(syk, rg, outf, tarray, entropy);
+	    }
 	    for (size_t j = 0; j < tarray.size(); j++) {
 		entf << tarray[j] << " " << entropy[j] << std::endl;
 		entropy_sum[j] += entropy[j];

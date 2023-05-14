@@ -35,6 +35,7 @@ Revision History:
 #else
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
+#include <cusolverDn.h>
 #include <curand.h>
 #include <cuda/std/complex>
 #define DEVHOST __device__ __host__

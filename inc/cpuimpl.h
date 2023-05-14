@@ -28,7 +28,7 @@ Revision History:
 //   O = \sum_i O_i
 //
 // where each O_i is a spin operator.
-template<typename FpType>
+template<typename FpType = DefFpType>
 class HostSumOps {
     template<typename FpType1>
     friend class HostSumOps;
@@ -360,9 +360,6 @@ public:
 
     template<typename FpType>
     using ElemRefType = ComplexScalar<FpType> &;
-
-    template<typename FpType>
-    using ElemConstRefType = const ComplexScalar<FpType> &;
 
     template<typename FpType>
     using SumOps = HostSumOps<FpType>;

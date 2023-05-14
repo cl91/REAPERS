@@ -239,7 +239,7 @@ public:
 	return energy;
     }
 
-    typename Impl::template ElemConstRefType<FpType> operator[](IndexType i) const {
+    ComplexScalar operator[](IndexType i) const {
 	return buf()[i];
     }
 
