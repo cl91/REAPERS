@@ -130,6 +130,10 @@ __global__ void krnl_scale_vecs(ComplexType *res,
     res[i] = cmul(lambda[i>>shift], v[i]);
 }
 
+#define cuda_sync()				\
+    CUDA_CALL(cudaPeekAtLastError());		\
+    CUDA_CALL(cudaDeviceSynchronize());
+
 // Copy v1 into v0, converting float to double.
 void GPUImpl::copy_vec(VecSizeType<double> size, BufType<double> v0,
 		       ConstBufType<float> v1) {
@@ -137,7 +141,7 @@ void GPUImpl::copy_vec(VecSizeType<double> size, BufType<double> v0,
     get_block_grid_size(size, blocksize, gridsize);
     krnl_ftod_vec<<<gridsize, blocksize>>>((CudaComplexPtr<double>)v0.dev_ptr,
 					   (CudaComplexConstPtr<float>)v1.dev_ptr);
-    CUDA_CALL(cudaDeviceSynchronize());
+    cuda_sync();
 }
 
 // Copy v1 into v0, converting double to float by rounding toward zero.
@@ -147,7 +151,7 @@ void GPUImpl::copy_vec(VecSizeType<float> size, BufType<float> v0,
     get_block_grid_size(size, blocksize, gridsize);
     krnl_dtof_vec<<<gridsize, blocksize>>>((CudaComplexPtr<float>)v0.dev_ptr,
 					   (CudaComplexConstPtr<double>)v1.dev_ptr);
-    CUDA_CALL(cudaDeviceSynchronize());
+    cuda_sync();
 }
 
 // Compute v0 += v1. v0 and v1 are assumed to point to different buffers.
@@ -158,7 +162,7 @@ void GPUImpl::add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
     get_block_grid_size(size, blocksize, gridsize);
     krnl_vec_add<<<gridsize, blocksize>>>((CudaComplexPtr<FpType>)v0.dev_ptr,
 					  (CudaComplexConstPtr<FpType>)v1.dev_ptr);
-    CUDA_CALL(cudaDeviceSynchronize());
+    cuda_sync();
 }
 
 // Compute res = v0 + v1. res is assumed to be different from both v0 and v1.
@@ -170,7 +174,7 @@ void GPUImpl::add_vec(VecSizeType<FpType> size, BufType<FpType> res,
     krnl_vec_add3<<<gridsize, blocksize>>>((CudaComplexPtr<FpType>)res.dev_ptr,
 					   (CudaComplexConstPtr<FpType>)v0.dev_ptr,
 					   (CudaComplexConstPtr<FpType>)v1.dev_ptr);
-    CUDA_CALL(cudaDeviceSynchronize());
+    cuda_sync();
 }
 
 // Compute res = ops * vec. res and vec are assumed to be different.
@@ -185,7 +189,7 @@ void GPUImpl::apply_ops(typename SpinOp<FpType>::IndexType len, BufType<FpType> 
 	    (CudaComplexPtr<FpType>)res.dev_ptr,
 	    ops.dev_ops, ops.ops.size(),
 	    (CudaComplexConstPtr<FpType>)vec.dev_ptr);
-	CUDA_CALL(cudaDeviceSynchronize());
+	cuda_sync();
     } else {
 	assert(ops.sparse_mat != nullptr);
     }
@@ -199,7 +203,7 @@ void GPUImpl::eye(typename DevSumOps<FpType>::MatrixType &res) {
     int blocksize, gridsize;
     get_block_grid_size(res.rowdim, blocksize, gridsize);
     krnl_eye<<<gridsize, blocksize>>>((CudaComplexPtr<FpType>)res.dev_ptr);
-    CUDA_CALL(cudaDeviceSynchronize());
+    cuda_sync();
 }
 
 template<typename FpType>
@@ -210,7 +214,7 @@ complex<FpType> GPUImpl::mat_tr(const typename DevSumOps<FpType>::MatrixType &ma
     get_block_grid_size(mat.rowdim, blocksize, gridsize);
     krnl_copy<<<gridsize, blocksize>>>((CudaComplexPtr<FpType>)diag.dev_ptr,
 				       (CudaComplexConstPtr<FpType>)mat.dev_ptr);
-    CUDA_CALL(cudaDeviceSynchronize());
+    cuda_sync();
     thrust::device_ptr<complex<FpType>> d(diag.dev_ptr);
     return thrust::reduce(d, d + mat.rowdim, complex<FpType>{},
 			  thrust::plus<complex<FpType>>());
@@ -224,7 +228,7 @@ void GPUImpl::exp_vec(typename DevSumOps<FpType>::MatrixType &res,
     get_block_grid_size(res.rowdim, blocksize, gridsize);
     krnl_vec_exp<<<gridsize, blocksize>>>((CudaComplexPtr<FpType>)res.dev_ptr,
 					  v, c.real(), c.imag());
-    CUDA_CALL(cudaDeviceSynchronize());
+    cuda_sync();
 }
 
 template<typename FpType>
@@ -245,7 +249,7 @@ void GPUImpl::scale_vecs(typename DevSumOps<FpType>::MatrixType &res,
 	(CudaComplexPtr<FpType>)res.dev_ptr,
 	(CudaComplexConstPtr<FpType>)v.dev_ptr,
 	(CudaComplexConstPtr<FpType>)lambda.dev_ptr, len);
-    CUDA_CALL(cudaDeviceSynchronize());
+    cuda_sync();
 }
 
 // We need the explicit template instantiations below due to link error.
