@@ -59,6 +59,12 @@ Revision History:
 	}							\
     } while(0)
 
+#define cuda_alloc(p, sz)			\
+    CUDA_CALL(cudaMalloc((void **)&(p), (sz)));	\
+    if ((p) == nullptr) {			\
+	ThrowException(DevOutOfMem, (sz));	\
+    }
+
 // CUDA defines its own complex number type which is different from
 // cuda::std::complex so we need to convert between them. Fortunately
 // they both have the same in-memory layout so we can trivially
@@ -150,7 +156,7 @@ public:
 	    rowdim = newrowdim;
 	    coldim = newcoldim;
 	    if (datasize()) {
-		CUDA_CALL(cudaMalloc((void **)&dev_ptr, datasize()));
+		cuda_alloc(dev_ptr, datasize());
 	    } else {
 		dev_ptr = nullptr;
 	    }
@@ -249,7 +255,7 @@ private:
 //	    if (ops.size() < (1ULL << len)) {
 	if (true) {
 	    auto size = this->ops.size() * sizeof(SpinOp<FpType>);
-	    CUDA_CALL(cudaMalloc((void **)&dev_ops, size));
+	    cuda_alloc(dev_ops, size);
 	    CUDA_CALL(cudaMemcpy(dev_ops, this->ops.data(),
 				 size, cudaMemcpyHostToDevice));
 	} else {
@@ -356,16 +362,16 @@ class GPUImpl {
 	};
     public:
 	DeviceVec(size_t dim) : dim(dim) {
-	    CUDA_CALL(cudaMalloc((void **)&dev_ptr, dim * sizeof(ComplexScalar)));
+	    cuda_alloc(dev_ptr, dim * sizeof(ComplexScalar));
 	}
 
-	DeviceVec(DeviceVec &&v) {
+	DeviceVec(DeviceVec &&v) : dim(v.dim) {
 	    dev_ptr = v.dev_ptr;
 	    v.dev_ptr = nullptr;
 	}
 
-	explicit DeviceVec(const CPUImpl::VecType<FpType> &v) : dim(v.size()) {
-	    CUDA_CALL(cudaMalloc((void **)&dev_ptr, dim * sizeof(ComplexScalar)));
+	explicit DeviceVec(const CPUImpl::VecType<FpType> &v) : dim(v.dimension()) {
+	    cuda_alloc(dev_ptr, dim * sizeof(ComplexScalar));
 	    CUDA_CALL(cudaMemcpy(dev_ptr, v.get(), dim * sizeof(ComplexScalar),
 				 cudaMemcpyHostToDevice));
 	}
@@ -383,13 +389,8 @@ class GPUImpl {
 	    }
 	}
 
-	DeviceVec &get() {
-	    return *this;
-	}
-
-	const DeviceVec &get() const {
-	    return *this;
-	}
+	DeviceVec &get() { return *this; }
+	const DeviceVec &get() const { return *this; }
 
 	friend void swap(DeviceVec &lhs, DeviceVec &rhs) {
 	    std::swap(lhs.dev_ptr, rhs.dev_ptr);
@@ -800,7 +801,7 @@ inline DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensystem(int len
 	if (dev_eigenvals) {
 	    cudaFree(dev_eigenvals);
 	}
-	CUDA_CALL(cudaMalloc(&dev_eigenvals, dim * sizeof(FpType)));
+	cuda_alloc(dev_eigenvals, dim * sizeof(FpType));
 	assert(dev_eigenvals);
 	eigenvecs = std::make_unique<MatrixType>(get_matrix(len));
 
@@ -818,14 +819,14 @@ inline DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensystem(int len
 							  dworksz, lworksz));
 	void *d_work{};   // Workspace on the device
 	if (dworksz) {
-	    CUDA_CALL(cudaMalloc(&d_work, dworksz));
+	    cuda_alloc(d_work, dworksz);
 	}
 	std::unique_ptr<char[]> l_work; // Workspace on the host
 	if (lworksz) {
 	    l_work = std::make_unique<char[]>(lworksz);
 	}
 	int *d_info;	    // Result information status on the device
-	CUDA_CALL(cudaMalloc((void **)&d_info, sizeof(int)));
+	cuda_alloc(d_info, sizeof(int));
 
 	// Compute the eigenvalues and eigenvectors for a Hermitian matrix.
 	// At the end of the call the eigenvecs matrix is overwritten with

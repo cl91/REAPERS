@@ -98,7 +98,7 @@ public:
     // In this case the conversions must be explicit.
     template<typename FpType1, typename Impl1>
     explicit State(const State<FpType1, Impl1> &st) : len(st.len), curbuf(0) {
-	bufs.emplace_back(typename Impl::VecType(st.bufs[st.curbuf % st.num_bufs()]));
+	bufs.emplace_back(static_cast<typename Impl::template VecType<FpType>>(st.bufs[st.curbuf % st.num_bufs()]));
     }
 
     // Make the state a Haar random state

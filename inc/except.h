@@ -125,3 +125,14 @@ public:
 	msg += ss.str();
     }
 };
+
+// Exception class thrown when a CUDA device memory allocation has failed
+class DevOutOfMem : public Exception {
+public:
+    DevOutOfMem(const char *f, int l, const char *fn, size_t size)
+	: Exception(f, l, fn) {
+	std::stringstream ss;
+	ss << "Failed to allocate " << size << " bytes on CUDA device.";
+	msg += ss.str();
+    }
+};

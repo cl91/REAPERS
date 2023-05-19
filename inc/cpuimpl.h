@@ -330,7 +330,7 @@ class CPUImpl {
 	    lhs = std::move(rhs);
 	    rhs = std::move(v0);
 	}
-	size_t size() const { return dim; }
+	size_t dimension() const { return dim; }
     };
 
     class Context {

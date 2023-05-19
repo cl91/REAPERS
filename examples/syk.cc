@@ -48,6 +48,7 @@ struct SykArgParser : ArgParser {
     bool seed_from_time;
     bool exact_diag;
     bool exact_diag_trace;
+    bool swap;
     float beta;
     float j_coupling;
     float kry_tol;
@@ -91,6 +92,8 @@ private:
 	     "Seed the pRNG using system time. By default, we use std::random_device"
 	     " from the C++ stanfard library. Enable this if your C++ implementation's"
 	     " std::random_device is broken (eg. deterministic).")
+	    ("swap", progopts::bool_switch(&swap)->default_value(false),
+	     "Enable swapping for VRAM by offloading it to host memory.")
 	    ("exact-diag", progopts::bool_switch(&exact_diag)->default_value(false),
 	     "Use exact diagonalization rather than the Krylov method to compute"
 	     " the state evolution exp(-iHt).")
@@ -210,17 +213,16 @@ public:
     // tracing over the n-point operator. In both cases results will be written
     // to vector v (after normalizing them by dividing by v[0]) as well as file
     // outf, and accumulated into sum.
-    void eval(const SYK<FpType> &syk, const HamOp<FpType> &ham, State<FpType> *s0,
-	      State<FpType> *s, std::vector<complex<FpType>> &v,
-	      std::ofstream &outf, std::vector<complex<FpType>> &sum,
-	      Logger &logger) {
+    void eval(const SYK<FpType> &syk, const HamOp<FpType> &ham,
+	      std::unique_ptr<State<FpType>> &s0,
+	      std::vector<complex<FpType>> &v, std::ofstream &outf,
+	      std::vector<complex<FpType>> &sum, Logger &logger) {
 	auto start_time = time(nullptr);
 	auto current_time = start_time;
 	logger << "Running fp" << sizeof(FpType)*8 << " calculation." << endl;
 	FpType dt = args.tmax / args.nsteps;
 	if (args.exact_diag_trace) {
-	    assert(s0 == nullptr);
-	    assert(s == nullptr);
+	    assert(!s0);
 	    auto expmbH = ham.LL.matexp({-args.beta,0}, args.N/2-1);
 	    for (int i = 0; i <= args.nsteps; i++) {
 		v[i] = evolve_trace(ham.LL, ham.RR, expmbH, i*dt, syk.fermion_ops());
@@ -232,18 +234,28 @@ public:
 		current_time = tm;
 	    }
 	} else {
-	    assert(s0 != nullptr);
-	    assert(s != nullptr);
+	    assert(s0);
 	    pre_evolve(ham.LL, *s0, args.beta);
 	    s0->gc();
+	    std::unique_ptr<State<FpType,CPUImpl>> hostst;
+	    if (args.swap) {
+		hostst = std::make_unique<State<FpType,CPUImpl>>(*s0);
+	    }
 	    auto tm = time(nullptr);
 	    logger << "Pre-evolve done. Time spent: "
 		   << tm - current_time << "s." << endl;
 	    current_time = tm;
 	    for (int i = 0; i <= args.nsteps; i++) {
-		*s = *s0;
-		evolve(ham.LL, ham.RR, *s, i*dt, args.beta, syk.fermion_ops());
-		v[i] = (*s0) * (*s);
+		State<FpType> s(*s0);
+		if (args.swap) {
+		    s0.reset();
+		}
+		evolve(ham.LL, ham.RR, s, i*dt, args.beta, syk.fermion_ops());
+		if (args.swap) {
+		    s.gc();
+		    s0 = std::make_unique<State<FpType>>(*hostst);
+		}
+		v[i] = (*s0) * s;
 		auto tm = time(nullptr);
 		logger << "Time step " << i*dt << " done. Time for this step: "
 		       << tm - current_time << "s"
@@ -432,15 +444,13 @@ class Runner : protected SykArgParser {
 	    logger << " krylov tolerance " << kry_tol;
 	}
 	logger << endl;
-	std::unique_ptr<State<float>> init32, s32;
-	std::unique_ptr<State<double>> init64, s64;
+	std::unique_ptr<State<float>> init32;
+	std::unique_ptr<State<double>> init64;
 	if (fp32 && !exact_diag_trace) {
 	    init32 = std::make_unique<State<float>>(N/2-1);
-	    s32 = std::make_unique<State<float>>(N/2-1);
 	}
 	if (fp64 && !exact_diag_trace) {
 	    init64 = std::make_unique<State<double>>(N/2-1);
-	    s64 = std::make_unique<State<double>>(N/2-1);
 	}
 	SYK<float> syk32(N, sparsity, j_coupling, non_standard_gamma);
 	SYK<double> syk64(N, sparsity, j_coupling, non_standard_gamma);
@@ -483,8 +493,7 @@ class Runner : protected SykArgParser {
 		    }
 		    ham32 = ham64;
 		}
-		eval32.eval(syk32, ham32, init32.get(), s32.get(), v32,
-			    outf32, sum32, logger);
+		eval32.eval(syk32, ham32, init32, v32, outf32, sum32, logger);
 	    }
 	    if (fp64) {
 		// If user specfied both --fp32 and --fp64 but did not specify
@@ -496,8 +505,7 @@ class Runner : protected SykArgParser {
 		    }
 		    ham64 = ham32;
 		}
-		eval64.eval(syk64, ham64, init64.get(), s64.get(), v64,
-			    outf64, sum64, logger);
+		eval64.eval(syk64, ham64, init64, v64, outf64, sum64, logger);
 	    }
 	    if (fp32 && fp64) {
 		// If user requested both fp32 and fp64, also compute the difference
