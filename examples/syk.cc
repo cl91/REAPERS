@@ -18,8 +18,6 @@ Revision History:
 
 #include <ctime>
 #include <memory>
-#include <filesystem>
-#include "argparser.h"
 #include "pcg_random.h"
 
 #ifdef MAX_NUM_FERMIONS
@@ -28,6 +26,7 @@ Revision History:
 
 #define REAPERS_USE_PARITY_BLOCKS
 #include <reapers.h>
+#include "argparser.h"
 
 using namespace REAPERS;
 using namespace REAPERS::Model;
@@ -118,10 +117,6 @@ private:
 		      << std::endl;
 	    return false;
 	}
-
-	// If user has specified a data directory, switch to it.
-	std::filesystem::create_directory(data_dir);
-	std::filesystem::current_path(data_dir);
 
 	return true;
     }

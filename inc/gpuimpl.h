@@ -113,10 +113,17 @@ using CudaComplexPtr = CudaComplexType<FpType> *;
 template<RealScalar FpType>
 using CudaComplexConstPtr = const CudaComplexType<FpType> *;
 
+class GPUImpl;
+
 // This class represents a sum of spin operators in device memory
 template<RealScalar FpType>
 class DevSumOps : public HostSumOps<FpType> {
     friend class GPUImpl;
+    // This is needed so that the _matexp_helper static member function from
+    // the parent class can access the derived class matexp_cache member.
+    friend class HostSumOps<FpType>;
+
+    using Impl = GPUImpl;
 
 public:
     // This class is exposed to the end user so we need to be especially careful.
@@ -194,9 +201,7 @@ public:
 	    *this = m;
 	}
 
-	~MatrixType() {
-	    release();
-	}
+	~MatrixType() { release(); }
 
 	static MatrixType Identity(ssize_t rowdim, ssize_t coldim);
 
@@ -275,12 +280,15 @@ public:
     using EigenVecs = MatrixType;
 
 private:
+
     mutable SpinOp<FpType> *dev_ops;
     mutable std::unique_ptr<MatrixType> dev_mat;
     mutable EigenVals host_eigenvals;
     mutable FpType *dev_eigenvals;
     mutable std::unique_ptr<EigenVecs> eigenvecs;
     mutable void *sparse_mat;
+    // Note this hides the matexp_cache member of the parent class.
+    mutable HostSumOps<FpType>::template MatexpCache<MatrixType,GPUImpl> matexp_cache;
 
     // Upload the host summed operators to the device. If the number of operators
     // is less than 2^len, then simply copy the operators to the device side.
@@ -304,9 +312,10 @@ private:
     // Free the device copy of the host summed operators. This should
     // be called after every update to the operator list, so next time
     // GPUImpl::apply_ops can upload a fresh copy of the latest SumOps.
-    void release() {
+    void release() const {
 	// We must call the parent class release() function.
 	HostSumOps<FpType>::release();
+	mini_release();
 	if (dev_ops) {
 	    cudaFree(dev_ops);
 	    dev_ops = nullptr;
@@ -322,6 +331,11 @@ private:
 	    assert(false);
 	    sparse_mat = nullptr;
 	}
+    }
+
+    void mini_release() const {
+	HostSumOps<FpType>::mini_release();
+	matexp_cache.clear();
     }
 
 public:
@@ -358,7 +372,12 @@ public:
     EigenSystem get_eigensystem(int len) const;
 
     // Same as HostSumOps::matexp(), except computations are done on the GPU.
-    MatrixType matexp(complex<FpType> c, int len) const;
+private:
+    MatrixType _matexp(complex<FpType> c, int len) const;
+public:
+    const MatrixType &matexp(complex<FpType> c, int len) const {
+	return REAPERS::HostSumOps<FpType>::_matexp_helper(*this, c, len);
+    }
 
     friend std::ostream &operator<<(std::ostream &os, const DevSumOps &s) {
 	os << static_cast<const HostSumOps<FpType> &>(s) << " devptr " << s.dev_ops;
@@ -449,18 +468,58 @@ class GPUImpl {
 	cublasHandle_t hcublas;
 	cusolverDnHandle_t hcusolver;
 	curandGenerator_t randgen;
+	size_t vram_total_size;
+	size_t vram_free_size;
 	GPUContext() {
 	    CUBLAS_CALL(cublasCreate(&hcublas));
 	    CUSOLVER_CALL(cusolverDnCreate(&hcusolver));
 	    CURAND_CALL(curandCreateGenerator(&randgen, CURAND_RNG_PSEUDO_DEFAULT));
 	    std::random_device rd;
 	    CURAND_CALL(curandSetPseudoRandomGeneratorSeed(randgen, rd()));
+	    CUDA_CALL(cudaMemGetInfo(&vram_free_size, &vram_total_size));
 	}
     };
 
     inline static GPUContext ctx;
+    // By default we will use 50% of available VRAM for the matexp cache.
+    inline static size_t max_cache_size = ctx.vram_free_size / 2;
+    // Current cache size
+    inline static size_t cache_size = 0;
 
 public:
+    // You must call cache.evict() if this function returns false.
+    static bool cache_reserve(size_t sz) {
+	if ((cache_size + sz) > max_cache_size) {
+	    return false;
+	} else {
+	    cache_size += sz;
+	    return true;
+	}
+    }
+
+    static void cache_release(size_t sz) {
+	assert(sz <= cache_size);
+	if (sz <= cache_size) {
+	    cache_size -= sz;
+	}
+    }
+
+    static void set_max_cache_size(size_t sz) {
+	max_cache_size = sz;
+    }
+
+    static void set_max_cache_size(float fraction) {
+	max_cache_size = (size_t)(ctx.vram_free_size * fraction);
+    }
+
+    static size_t get_max_cache_size() {
+	return max_cache_size;
+    }
+
+    static size_t get_current_cache_size() {
+	return cache_size;
+    }
+
     template<RealScalar FpType>
     using VecType = DeviceVec<FpType>;
 
@@ -945,8 +1004,8 @@ inline DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensystem(int len
 }
 
 template<RealScalar FpType>
-inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::matexp(complex<FpType> c,
-							       int len) const {
+inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::_matexp(complex<FpType> c,
+								int len) const {
     get_eigensystem(len);
     assert(dev_eigenvals);
     assert(host_eigenvals.rows() == (1LL << len));

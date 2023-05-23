@@ -31,6 +31,7 @@ Revision History:
 #include <iostream>
 #include <fstream>
 #include <boost/program_options.hpp>
+#include <filesystem>
 
 namespace progopts = boost::program_options;
 
@@ -55,6 +56,8 @@ public:
     float tmax;
     int krylov_dim;
     bool trace;
+    float cache_size_vram;
+    float cache_size_gb;
 
     ArgParser() : optdesc("Allowed options") {}
 
@@ -85,7 +88,18 @@ public:
 	     "Specifies the dimension of the Krylov subspace. Default value is 5.")
 	    ("trace", progopts::bool_switch(&trace)->default_value(false),
 	     "When computing the n-point function or purity, use the full trace"
-	     " definition rather than the inner product of initial and final state.");
+	     " definition rather than the inner product of initial and final state.")
+#ifndef REAPERS_NOGPU
+	    ("cache-size-vram",
+	     progopts::value<float>(&cache_size_vram)->default_value(0.0),
+	     "Set the matexp cache size to be the specified value times the"
+	     " amount of available VRAM at program startup. Default is 0.5 (50%).")
+#endif
+	    ("cache-size-gb",
+	     progopts::value<float>(&cache_size_gb)->default_value(0.0),
+	     "Set the matexp cache size to be the specified GB. For CPU backend"
+	     " the default is 16GB. For GPU backend the default is 50% of"
+	     " available VRAM at program startup.");
 
 	// Let our children add their own supported options.
 	parse_hook();
@@ -116,6 +130,34 @@ public:
 	    std::cerr << "You must specify --fp32 or --fp64" << std::endl;
 	    return false;
 	}
+
+	// If user has specified a data directory, switch to it.
+	std::filesystem::create_directory(data_dir);
+	std::filesystem::current_path(data_dir);
+
+	// If user has specified the matexp cache size, set the cache size.
+	if (cache_size_gb != 0.0) {
+	    if (cache_size_gb < 0.0) {
+		std::cerr << "Cache size in GB must be positive."
+			  << std::endl;
+		return false;
+	    }
+	    REAPERS::DefImpl::set_max_cache_size((size_t)(cache_size_gb * 1024) << 20);
+	}
+#ifndef REAPERS_NOGPU
+	if (cache_size_vram != 0.0) {
+	    if (cache_size_gb != 0.0) {
+		std::cerr << "You cannot specify both --cache-size-gb and "
+		    "--cache-size-vram" << std::endl;
+		return false;
+	    }
+	    if (cache_size_vram < 0.0) {
+		std::cerr << "Cache size must be positive." << std::endl;
+		return false;
+	    }
+	    REAPERS::GPUImpl::set_max_cache_size(cache_size_vram);
+	}
+#endif
 
 	// Let our children add their own option checking.
 	return optcheck_hook();

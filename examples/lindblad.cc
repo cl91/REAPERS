@@ -22,15 +22,14 @@ Revision History:
 --*/
 
 #include <ctime>
-#include <filesystem>
-#include "argparser.h"
 
 #ifdef MAX_NUM_FERMIONS
 #define REAPERS_SPIN_SITES	(MAX_NUM_FERMIONS/2 - 1)
 #endif
 
 #define REAPERS_USE_PARITY_BLOCKS
-#include "reapers.h"
+#include <reapers.h>
+#include "argparser.h"
 
 using namespace REAPERS;
 using namespace REAPERS::Model;
@@ -76,10 +75,8 @@ class Eval : protected ArgParser {
 	if (t0 > tmax) {
 	    std::cout << "Starting time cannot be greater than maximum time"
 		      << std::endl;
+	    return false;
 	}
-	// If user has specified a data directory, switch to it.
-	std::filesystem::create_directory(data_dir);
-	std::filesystem::current_path(data_dir);
 	return true;
     }
 

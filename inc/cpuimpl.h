@@ -23,6 +23,9 @@ Revision History:
 #include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
 #endif
 
+// Forward declaration
+class CPUImpl;
+
 // This class represents a sum of spin operators in host memory
 //
 //   O = \sum_i O_i
@@ -33,6 +36,8 @@ class HostSumOps {
     template<RealScalar FpType1>
     friend class HostSumOps;
 
+    using Impl = CPUImpl;
+
 public:
     using MatrixType = Eigen::Matrix<std::complex<FpType>,
 				     Eigen::Dynamic, Eigen::Dynamic>;
@@ -40,23 +45,74 @@ public:
     using EigenVecs = MatrixType;
 
 protected:
+    // Cache for the matexp results. We implement a simple LRU (least recently
+    // used) policy where we evict the least accessed result if we need to
+    // make space.
+    template<typename MatTy, typename Impl>
+    class MatexpCache {
+	// The u64 is the number of times that the corresponding matexp result
+	// has been accessed.
+	std::map<std::tuple<FpType,FpType>,std::tuple<MatTy,u64>> cache;
+	size_t size{};
+	// Find the least accessed matexp result and evict it
+	void evict() {
+	    auto it = cache.end();
+	    u64 hit_count = ~0ULL;
+	    for (auto i = cache.begin(); i != cache.end(); i++) {
+		if (std::get<1>(i->second) < hit_count) {
+		    it = i;
+		}
+	    }
+	    if (it != cache.end()) {
+		size -= sizeof(complex<FpType>) * std::get<0>(it->second).size();
+		cache.erase(it);
+	    }
+	}
+    public:
+	using ImplTy = Impl;
+	std::tuple<bool, const MatTy &> find(complex<FpType> c) {
+	    auto it = cache.find({c.real(), c.imag()});
+	    if (it != cache.end()) {
+		++std::get<1>(it->second);
+		return {true, std::get<0>(it->second)};
+	    }
+	    return {false, {}};
+	}
+	const MatTy &insert(complex<FpType> c, MatTy &&res) {
+	    // You can only call this function if there is no matrix
+	    // indexed by c in the cache.
+	    assert(!std::get<0>(find(c)));
+	    size_t sz = sizeof(complex<FpType>) * res.size();
+	    size += sz;
+	    if (!Impl::cache_reserve(sz)) { evict(); }
+	    std::tuple<FpType,FpType> key = {c.real(), c.imag()};
+	    auto it = cache.emplace(key, std::tuple{res,0});
+	    assert(std::get<1>(it));
+	    return std::get<0>(std::get<0>(it)->second);
+	}
+	void clear() { cache.clear(); Impl::cache_release(size); size = 0; }
+    };
+
     std::vector<SpinOp<FpType>> ops;
     mutable MatrixType mat;
     mutable EigenVals eigenvals;
     mutable EigenVecs eigenvecs;
+    mutable MatexpCache<MatrixType,CPUImpl> matexp_cache;
 
     // Release the mutable internal state used for caching the results of the
-    // get_matrix() and related functions. Note this should NOT be marked as
-    // const (despite the fact that it does not modify any non-mutable member),
-    // because we should not call release() in a const member function.
-    // Additionally, any derived class MUST call the parent class release()
-    // function if it has any mutable internal state (and therefore has to
-    // override this function).
-    virtual void release() {
+    // get_matrix() and related functions. Note that any derived class MUST
+    // call the parent class release() function if it has any mutable internal
+    // state (and therefore has to override this function).
+    virtual void release() const {
+	mini_release();
 	// This will delete the underlying arrays for the matrices.
 	mat.resize(0, 0);
 	eigenvals.resize(0, 1);
 	eigenvecs.resize(0, 0);
+    }
+
+    virtual void mini_release() const {
+	matexp_cache.clear();
     }
 
 public:
@@ -318,11 +374,9 @@ public:
 	return {eigenvals, eigenvecs};
     }
 
-    // Compute the matrix exponential using exact diagonalization. Note you
-    // should NOT call this function if you want to compute state evolution
-    // (especially if you want to use Krylov). Call State::evolve() instead.
-    // Here len is the length of the spin chain.
-    MatrixType matexp(complex<FpType> c, int len) const {
+private:
+    // Compute the matrix exponential using exact diagonalization.
+    MatrixType _matexp(complex<FpType> c, int len) const {
 	EigenSystem eigensys = get_eigensystem(len);
 	const EigenVals &eigenvals = std::get<0>(eigensys);
 	assert(eigenvals.rows() == (1LL << len));
@@ -339,6 +393,46 @@ public:
 	});
 	MatrixType vexpevd = vexp.asDiagonal() * eigenvecs.adjoint();
 	return eigenvecs * vexpevd;
+    }
+
+protected:
+    // Helper function to check the cached results first. If no result is
+    // cached, compute the result and add it to the cache.
+    template<typename OpTy>
+    requires std::same_as<typename OpTy::Impl,
+			  typename decltype(OpTy::matexp_cache)::ImplTy>
+    static const typename OpTy::MatrixType &_matexp_helper(const OpTy &ops,
+							   complex<FpType> c,
+							   int len) {
+	// First check in the cached results to see if this matexp has
+	// already been computed before.
+	auto it = ops.matexp_cache.find(c);
+	if (std::get<0>(it)) {
+	    return std::get<1>(it);
+	}
+	// If not, insert the result of the matexp into the cache.
+	// This will retire the least used (or oldest, depending on
+	// cache policy) result if the cache is full.
+	return ops.matexp_cache.insert(c, ops._matexp(c, len));
+    }
+
+public:
+    // Compute the matrix exponential using exact diagonalization. Note you
+    // should NOT call this function if you want to compute state evolution
+    // (especially if you want to use Krylov). Call State::evolve() instead.
+    // Here len is the length of the spin chain.
+    MatrixType matexp(complex<FpType> c, int len) const {
+	return _matexp_helper(*this, c, len);
+    }
+
+    void gc(bool full = false) const {
+	// If the user wants a full GC, release all cached results.
+	if (full) {
+	    release();
+	} else {
+	    // Otherwise, only release some cached results.
+	    mini_release();
+	}
     }
 
     friend std::ostream &operator<<(std::ostream &os, const HostSumOps &s) {
@@ -379,6 +473,9 @@ public:
 // so-called 'singleton' class.
 class CPUImpl {
     template<RealScalar FpType>
+    friend class HostSumOps;
+
+    template<RealScalar FpType>
     class HostVec {
 	size_t dim;
 	std::unique_ptr<complex<FpType>[]> vec;
@@ -408,8 +505,41 @@ class CPUImpl {
     };
 
     inline static Context ctx;
+    // 16GB ought to be enough for everybody.
+    inline static size_t max_cache_size = 16ULL << 30;
+    // Current cache size
+    inline static size_t cache_size = 0;
 
 public:
+    // You must call cache.evict() if this function returns false.
+    static bool cache_reserve(size_t sz) {
+	if ((cache_size + sz) > max_cache_size) {
+	    return false;
+	} else {
+	    cache_size += sz;
+	    return true;
+	}
+    }
+
+    static void cache_release(size_t sz) {
+	assert(sz <= cache_size);
+	if (sz <= cache_size) {
+	    cache_size -= sz;
+	}
+    }
+
+    static void set_max_cache_size(size_t sz) {
+	max_cache_size = sz;
+    }
+
+    static size_t get_max_cache_size() {
+	return max_cache_size;
+    }
+
+    static size_t get_current_cache_size() {
+	return cache_size;
+    }
+
     template<RealScalar FpType>
     using VecType = HostVec<FpType>;
 
