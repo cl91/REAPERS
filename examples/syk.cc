@@ -33,8 +33,11 @@ using namespace REAPERS;
 using namespace REAPERS::Model;
 using namespace REAPERS::EvolutionAlgorithm;
 
-template<typename FpType>
+template<RealScalar FpType>
 using MatrixType = typename SumOps<FpType>::MatrixType;
+
+template<RealScalar FpType>
+using HamOp = typename SYK<FpType>::HamOp;
 
 // Argument parser for the SYK simulation program.
 struct SykArgParser : ArgParser {
@@ -47,7 +50,6 @@ struct SykArgParser : ArgParser {
     bool non_standard_gamma;
     bool seed_from_time;
     bool exact_diag;
-    bool exact_diag_trace;
     bool swap;
     float beta;
     float j_coupling;
@@ -92,15 +94,11 @@ private:
 	     "Seed the pRNG using system time. By default, we use std::random_device"
 	     " from the C++ stanfard library. Enable this if your C++ implementation's"
 	     " std::random_device is broken (eg. deterministic).")
-	    ("swap", progopts::bool_switch(&swap)->default_value(false),
-	     "Enable swapping for VRAM by offloading it to host memory.")
 	    ("exact-diag", progopts::bool_switch(&exact_diag)->default_value(false),
 	     "Use exact diagonalization rather than the Krylov method to compute"
 	     " the state evolution exp(-iHt).")
-	    ("exact-diag-trace",
-	     progopts::bool_switch(&exact_diag_trace)->default_value(false),
-	     "Rather than computing the time evolution of random Haar-states,"
-	     " use exact diagonalization to compute the trace of n-point operators.");
+	    ("swap", progopts::bool_switch(&swap)->default_value(false),
+	     "Enable swapping for VRAM by offloading it to host memory.");
     }
 
     bool optcheck_hook() {
@@ -115,8 +113,8 @@ private:
 	    return false;
 	}
 
-	if (exact_diag && exact_diag_trace) {
-	    std::cerr << "You cannot specify both --exact-diag and --exact-diag-trace."
+	if (exact_diag && trace) {
+	    std::cerr << "You cannot specify both --exact-diag and --trace."
 		      << std::endl;
 	    return false;
 	}
@@ -167,7 +165,7 @@ inline Logger &endl(Logger &ev) {
 
 // Base evaluator class for n-point functions which computes a single disorder
 // realization.
-template<typename FpType>
+template<RealScalar FpType>
 class BaseEval {
     virtual void pre_evolve(const SumOps<FpType> &ham, State<FpType> &s,
 			    FpType beta) = 0;
@@ -200,14 +198,14 @@ public:
 
     BaseEval(const char *name, const SykArgParser &args) : args(args), name(name) {}
 
-    // Evaluate the n-point function from 0 to t_max. In the case where exact_diag_trace
+    // Evaluate the n-point function from 0 to t_max. In the case where trace
     // is false (the default), we compute the inner product of s0 and s, where
     // s0 is the result of pre_evolve() applied to a random state, and s is the
     // result of evolve() applied to s0. Note that in this case, before calling
     // this function you must set s0 to a random state, and the state s0 is
     // modified during the call so if you need the original initial state, you
     // need to make a copy of it before calling this function. This is to minimize
-    // memory allocation overhead. If exact_diag_trace is set to true, this function
+    // memory allocation overhead. If trace is set to true, this function
     // computes exp(-beta H/4) as a matrix and then calls evolve_trace(), which
     // the child classes will override to compute the final n-point function by
     // tracing over the n-point operator. In both cases results will be written
@@ -221,7 +219,7 @@ public:
 	auto current_time = start_time;
 	logger << "Running fp" << sizeof(FpType)*8 << " calculation." << endl;
 	FpType dt = args.tmax / args.nsteps;
-	if (args.exact_diag_trace) {
+	if (args.trace) {
 	    assert(!s0);
 	    auto expmbH = ham.LL.matexp({-args.beta,0}, args.N/2-1);
 	    for (int i = 0; i <= args.nsteps; i++) {
@@ -274,7 +272,7 @@ public:
 };
 
 // This is the evaluator class for the retarded Green's function.
-template<typename FpType>
+template<RealScalar FpType>
 class Green : public BaseEval<FpType> {
     void pre_evolve(const SumOps<FpType> &ham, State<FpType> &s, FpType beta) {
         this->evolve_step(ham, s, 0, beta/2);
@@ -301,7 +299,7 @@ public:
 };
 
 // This is the evaluator class for the OTOC.
-template<typename FpType>
+template<RealScalar FpType>
 class OTOC : public BaseEval<FpType> {
     void pre_evolve(const SumOps<FpType> &ham, State<FpType> &s, FpType beta) {
         this->evolve_step(ham, s, 0, beta/8);
@@ -360,7 +358,7 @@ class Runner : protected SykArgParser {
 	}
 	ss << (regularize ? "reg" : "") << (non_standard_gamma ? "nsgamma" : "")
 	   << "tmax" << tmax << "nsteps" << nsteps;
-	if (!exact_diag && !exact_diag_trace) {
+	if (!exact_diag && !trace) {
 	    ss << "krydim" << krylov_dim;
 	    if (kry_tol != 0.0) {
 		ss << "krytol" << kry_tol;
@@ -375,7 +373,7 @@ class Runner : protected SykArgParser {
 	if (exact_diag) {
 	    ss << "ed";
 	}
-	if (exact_diag_trace) {
+	if (trace) {
 	    ss << "trace";
 	}
 	Eval<float> eval32(*this);
@@ -435,7 +433,7 @@ class Runner : protected SykArgParser {
 	       << " krydim " << krylov_dim
 	       << (use_mt19937 ? " MT19937" : " PCG64")
 	       << (exact_diag ? " exact diag" : "")
-	       << (exact_diag_trace ? " exact diag trace" : "")
+	       << (trace ? " trace" : "")
 	       << " J" << j_coupling;
 	if (otoc_idx >= 0) {
 	    logger << " otoc index " << otoc_idx;
@@ -446,10 +444,10 @@ class Runner : protected SykArgParser {
 	logger << endl;
 	std::unique_ptr<State<float>> init32;
 	std::unique_ptr<State<double>> init64;
-	if (fp32 && !exact_diag_trace) {
+	if (fp32 && !trace) {
 	    init32 = std::make_unique<State<float>>(N/2-1);
 	}
-	if (fp64 && !exact_diag_trace) {
+	if (fp64 && !trace) {
 	    init64 = std::make_unique<State<double>>(N/2-1);
 	}
 	SYK<float> syk32(N, sparsity, j_coupling, non_standard_gamma);
@@ -460,12 +458,12 @@ class Runner : protected SykArgParser {
 	for (int u = 0; u < M; u++) {
 	    logger << "Computing disorder " << u << endl;
 	    if (!fp32 || truncate_fp64) {
-		if (!exact_diag_trace) {
+		if (!trace) {
 		    init64->random_state();
 		}
 		ham64 = syk64.gen_ham(rg, regularize);
 	    } else {
-		if (!exact_diag_trace) {
+		if (!trace) {
 		    init32->random_state();
 		}
 		ham32 = syk32.gen_ham(rg, regularize);
@@ -488,7 +486,7 @@ class Runner : protected SykArgParser {
 		// truncating fp64 into fp32. If user specified to truncate,
 		// do the truncation now.
 		if (fp64 && truncate_fp64) {
-		    if (!exact_diag_trace) {
+		    if (!trace) {
 			*init32 = *init64;
 		    }
 		    ham32 = ham64;
@@ -500,7 +498,7 @@ class Runner : protected SykArgParser {
 		// --truncate-fp64, promote the fp32 Hamiltonian and initial states
 		// to fp64 instead.
 		if (fp32 && !truncate_fp64) {
-		    if (!exact_diag_trace) {
+		    if (!trace) {
 			*init64 = *init32;
 		    }
 		    ham64 = ham32;
@@ -591,4 +589,5 @@ int main(int argc, const char *argv[])
 		  << std::endl;
 	return 1;
     }
+    return 0;
 }

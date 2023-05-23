@@ -29,6 +29,7 @@ Revision History:
 #include <tuple>
 #include <set>
 #include <vector>
+#include <concepts>
 
 #ifdef REAPERS_NOGPU
 #define DEVHOST
@@ -53,66 +54,67 @@ Revision History:
 
 namespace REAPERS {
 
-#if defined(REAPERS_FP64) && defined(REAPERS_FP32)
-#error "You can only define one of REAPERS_FP64 or REAPERS_FP32"
-#include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
-#elif defined(REAPERS_FP64)
-using DefFpType = double;
-#else
-// If REAPERS_FP64 is not defined, we default to fp32
-using DefFpType = float;
-#endif
+    template<typename T>
+    concept RealScalar = std::floating_point<T>;
 
-#ifdef REAPERS_NOGPU
-template<typename FpType = DefFpType>
-using complex = std::complex<FpType>;
-#else
-template<typename FpType = DefFpType>
-using complex = cuda::std::complex<FpType>;
-#endif	// REAPERS_NOGPU
+    #if defined(REAPERS_FP64) && defined(REAPERS_FP32)
+    #error "You can only define one of REAPERS_FP64 or REAPERS_FP32"
+    #include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
+    #elif defined(REAPERS_FP64)
+    using DefFpType = double;
+    #else
+    // If REAPERS_FP64 is not defined, we default to fp32
+    using DefFpType = float;
+    #endif
 
-template<typename FpType = DefFpType>
-auto epsilon = std::numeric_limits<FpType>::epsilon;
+    #ifdef REAPERS_NOGPU
+    template<RealScalar FpType = DefFpType>
+    using complex = std::complex<FpType>;
+    #else
+    template<RealScalar FpType = DefFpType>
+    using complex = cuda::std::complex<FpType>;
+    #endif	// REAPERS_NOGPU
 
-#include "except.h"
-#include "ops.h"
-#include "cpuimpl.h"
+    template<RealScalar FpType = DefFpType>
+    auto epsilon = std::numeric_limits<FpType>::epsilon;
 
-#ifdef REAPERS_NOGPU
-using DefImpl = CPUImpl;
-#else
-#include "gpuimpl.h"
-#endif	// REAPERS_NOGPU
+    template<typename T>
+    concept ComplexScalar = std::convertible_to<T, complex<double>>
+	|| std::convertible_to<T, std::complex<double>>;
 
-template<typename FpType = DefFpType>
-using SumOps = DefImpl::SumOps<FpType>;
+    template<typename T>
+    concept ScalarType = RealScalar<T> || ComplexScalar<T>;
 
-// Define a helper function to convert a SpinOp to its matrix form
-template<typename FpType, typename T>
-typename SumOps<FpType>::MatrixType get_matrix(const T &op, int len);
+    #include "except.h"
+    #include "ops.h"
+    #include "cpuimpl.h"
 
-template<typename FpType>
-inline typename SumOps<FpType>::MatrixType get_matrix(const SpinOp<FpType> &op,
-						      int len) {
-    SumOps<FpType> ops(op);
-    return ops.get_matrix(len);
-}
+    #ifdef REAPERS_NOGPU
+    using DefImpl = CPUImpl;
+    #else
+    #include "gpuimpl.h"
+    #endif	// REAPERS_NOGPU
 
-template<typename FpType>
-inline typename SumOps<FpType>::MatrixType get_matrix(const SumOps<FpType> &ops,
-						      int len) {
-    return ops.get_matrix(len);
-}
+    template<RealScalar FpType = DefFpType>
+    using SumOps = DefImpl::SumOps<FpType>;
 
-#include "state.h"
+    template<RealScalar FpType = DefFpType>
+    inline SumOps<FpType> operator+(const SpinOp<FpType> &op0,
+				    const SpinOp<FpType> &op1) {
+	return SumOps<FpType>(op0) + op1;
+    }
 
-#ifdef REAPERS_USE_PARITY_BLOCKS
-#include "blkops.h"
-#else
-#include "fermions.h"
-#endif
+    template<RealScalar FpType = DefFpType>
+    inline SumOps<FpType> operator-(const SpinOp<FpType> &op0,
+				    const SpinOp<FpType> &op1) {
+	return SumOps<FpType>(op0) - op1;
+    }
 
-namespace Model {
-#include "syk.h"
-}
+    #include "blkops.h"
+    #include "state.h"
+
+    namespace Model {
+    #include "fermions.h"
+    #include "syk.h"
+    }
 }

@@ -5,11 +5,11 @@
 #include <reapers.h>
 
 using namespace REAPERS;
+using namespace REAPERS::Model;
 using MatrixType = HostSumOps<>::MatrixType;
 using EigenVals = HostSumOps<>::EigenVals;
 using EigenVecs = HostSumOps<>::EigenVecs;
 
-auto i = complex<>{0,1};
 auto id = SpinOp<>::identity();
 auto sx = SpinOp<>::sigma_x(0);
 auto sy = SpinOp<>::sigma_y(0);
@@ -21,9 +21,10 @@ auto sx2 = SpinOp<>::sigma_x(2);
 auto sy2 = SpinOp<>::sigma_y(2);
 auto sz2 = SpinOp<>::sigma_z(2);
 auto tol = epsilon<>()*1e2;
-auto sqrt2 = std::sqrt<DefFpType>(2);
+double sqrt2 = std::sqrt(2.0);
 
 TEST_CASE("single site multiplication") {
+    auto i = complex<>{0,1};
     CHECK(id * id == id);
     CHECK(id * sx == sx);
     CHECK(id * sy == sy);
@@ -43,6 +44,7 @@ TEST_CASE("single site multiplication") {
 }
 
 TEST_CASE("matrix representation") {
+    auto i = complex<>{0,1};
     MatrixType m(1,1);
     m << 1;
     SumOps ops = id;
@@ -184,6 +186,7 @@ TEST_CASE("eigenvalues and eigenvectors") {
     vecs << -1.0/sqrt2, 1.0/sqrt2,
 	1.0/sqrt2, 1.0/sqrt2;
     CHECK(eigensys_ok(sx, 1, vals, vecs));
+    auto i = complex<>{0,1};
     vecs << 1.0/sqrt2, 1.0/sqrt2,
 	-i/sqrt2, i/sqrt2;
     CHECK(eigensys_ok(sy, 1, vals, vecs));
@@ -203,6 +206,7 @@ TEST_CASE("matrix exponentials") {
 	1.17520119364380, 1.54308063481524;
     CHECK(almost_equal(ops.matexp(1, 1), m));
     ops = sy;
+    auto i = complex<>{0,1};
     m << 1.54308063481524, -1.17520119364380*i,
 	1.17520119364380*i, 1.54308063481524;
     CHECK(almost_equal(ops.matexp(1, 1), m));
@@ -222,4 +226,95 @@ TEST_CASE("matrix exponentials") {
     m << 0.540302305868140 + 0.841470984807897*i, 0,
 	0, 0.540302305868140 - 0.841470984807897*i;
     CHECK(almost_equal(ops.matexp(i, 1), m));
+}
+
+TEST_CASE("spin operator equality") {
+    CHECK(id == id);
+    CHECK(id != sx);
+    CHECK(id != sy);
+    CHECK(id != sz);
+    CHECK(sx != id);
+    CHECK(sx == sx);
+    CHECK(sx != sy);
+    CHECK(sx != sz);
+    CHECK(sy != id);
+    CHECK(sy != sx);
+    CHECK(sy == sy);
+    CHECK(sy != sz);
+    CHECK(sz != id);
+    CHECK(sz != sx);
+    CHECK(sz != sy);
+    CHECK(sz == sz);
+    CHECK(sx1 != sx);
+    CHECK(sx2 != sx);
+    CHECK(sx1 == sx1);
+    CHECK(sx2 == sx2);
+    CHECK(sy1 != sy);
+    CHECK(sy2 != sy);
+    CHECK(sy1 == sy1);
+    CHECK(sy2 == sy2);
+    CHECK(sz1 != sz);
+    CHECK(sz2 != sz);
+    CHECK(sz1 == sz1);
+    CHECK(sz2 == sz2);
+}
+
+TEST_CASE("commutativity of addition and multiplication") {
+    CHECK(id + sx == sx + id);
+    CHECK(id + sy == sy + id);
+    CHECK(id + sz == sz + id);
+    CHECK(sx + sy == sy + sx);
+    CHECK(sx + sz == sz + sx);
+    CHECK(sz + sy == sy + sz);
+    CHECK(sx1 + sy == sy + sx1);
+    CHECK(sx1 + sz == sz + sx1);
+    CHECK(sz1 + sy == sy + sz1);
+    CHECK(sx2 + sy == sy + sx2);
+    CHECK(sx2 + sz == sz + sx2);
+    CHECK(sz2 + sy == sy + sz2);
+    CHECK(sx2 + sy1 == sy1 + sx2);
+    CHECK(sx2 + sz1 == sz1 + sx2);
+    CHECK(sz2 + sy1 == sy1 + sz2);
+}
+
+TEST_CASE("subtraction") {
+    CHECK((id - id == 0));
+    CHECK((sx - sx == 0));
+    CHECK((sy - sy == 0));
+    CHECK((sz - sz == 0));
+    CHECK((sx1 - sx1 == 0));
+    CHECK((sy1 - sy1 == 0));
+    CHECK((sz1 - sz1 == 0));
+    CHECK((sx2 - sx2 == 0));
+    CHECK((sy2 - sy2 == 0));
+    CHECK((sz2 - sz2 == 0));
+    CHECK((sx2 - sx != 0));
+    CHECK((sy2 - sy != 0));
+    CHECK((sz2 - sz != 0));
+    CHECK((sx2 - sx1 != 0));
+    CHECK((sy2 - sy1 != 0));
+    CHECK((sz2 - sz1 != 0));
+}
+
+TEST_CASE("fermion ops commutative relation") {
+    double one = (1.0/sqrt2)*(1.0/sqrt2)*2;
+    for (int N = 4; N <= 20; N += 2) {
+	SYK syk(N, 0.0, 1.0, true);
+	auto gamma = syk.fermion_ops();
+	SYK syk2(N, 0.0, 1.0, false);
+	auto gamma2 = syk2.fermion_ops();
+	for (int i = 0; i < N; i++) {
+	    for (int j = 0; j < N; j++) {
+		auto comm = gamma[i]*gamma[j]+gamma[j]*gamma[i];
+		if (i != j) {
+		    CHECK(comm == 0);
+		} else {
+		    // Due to numerical limit 2*(1/sqrt2)^2 is not exactly 1.
+		    CHECK(comm == one);
+		}
+		auto comm2 = gamma2[i]*gamma2[j]+gamma2[j]*gamma2[i];
+		CHECK((comm2 == ((i == j) ? 2 : 0)));
+	    }
+	}
+    }
 }

@@ -27,14 +27,9 @@ void otoc(int N, double beta, double tmax, int nsteps)
     SYK syk(N);
     // Generate one disorder realization and obtain its Hamiltonian.
     auto ham = syk.gen_ham(rg);
-    // Define the operators we want for the OTOC. Note that syk.fermion_ops()
-    // returns the abstract spin operator represented using the Pauli matrices
-    // as the operator basis. To obtain the matrix representation of a spin
-    // operator, call get_matrix(op, L), where L is the spin chain length.
-    auto opA = syk.fermion_ops(N-1);
-    Matrix A = get_matrix(opA, N/2);
-    auto opB = syk.fermion_ops(N-2);
-    Matrix B = get_matrix(opB, N/2);
+    // Define the operators we want for the OTOC.
+    Matrix A = syk.fermion_ops(N-1);
+    Matrix B = syk.fermion_ops(N-2);
     // Compute exp(-beta H/4). Here N/2 is the length of the spin chain.
     Matrix rq = ham.matexp(-beta/4, N/2);
     // We compute t = 0..tmax with nsteps

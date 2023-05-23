@@ -8,8 +8,7 @@ Module Name:
 
 Abstract:
 
-    This header file contains implementations of the basic state vector operations
-    as well as the State class definition for the REAPERS library.
+    This header file contains the State class definition for the REAPERS library.
 
 Revision History:
 
@@ -25,7 +24,7 @@ Revision History:
 #endif
 
 // Forward declaration. This is needed by algo.h
-template<typename FpType, typename Impl>
+template<RealScalar FpType, typename Impl>
 class State;
 
 namespace EvolutionAlgorithm {
@@ -35,18 +34,20 @@ namespace EvolutionAlgorithm {
 #ifdef REAPERS_USE_MATRIX_POWER
 template<typename Impl>
 using DefEvolutionAlgorithm = EvolutionAlgorithm::MatrixPower<Impl>;
+#elif defined(REAPERS_USE_EXACT_DIAGONALIZATION)
+template<typename Impl>
+using DefEvolutionAlgorithm = EvolutionAlgorithm::ExactDiagonalization<Impl>;
 #else
 template<typename Impl>
 using DefEvolutionAlgorithm = EvolutionAlgorithm::Krylov<Impl>;
 #endif
 
 // This class represents a vector in the single-parity Hilbert space of the spin model.
-template<typename FpType = DefFpType, typename Impl = DefImpl>
+template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
 class State {
-    template<typename FpTy1, typename Impl1>
+    template<RealScalar FpTy1, typename Impl1>
     friend class State;
 
-    using ComplexScalar = typename SpinOp<FpType>::ComplexScalar;
     using IndexType = typename SpinOp<FpType>::StateType;
 
     // Spin chain length. In other words, the dimension of the Hilbert space is 1<<len;
@@ -87,7 +88,7 @@ public:
 
     // Conversion constructor between states with different floating point precisions.
     // In this case the conversions must be explicit.
-    template<typename FpType1>
+    template<RealScalar FpType1>
     explicit State(const State<FpType1, Impl> &st) : len(st.len), curbuf(0) {
 	bufs.emplace_back(dim());
 	Impl::copy_vec(dim(), buf(), st.buf());
@@ -96,7 +97,7 @@ public:
     // Conversion constructor between states with different vector operation
     // implementations (ie. from host vector to device vector, or vice verse).
     // In this case the conversions must be explicit.
-    template<typename FpType1, typename Impl1>
+    template<RealScalar FpType1, typename Impl1>
     explicit State(const State<FpType1, Impl1> &st) : len(st.len), curbuf(0) {
 	bufs.emplace_back(static_cast<typename Impl::template VecType<FpType>>(st.bufs[st.curbuf % st.num_bufs()]));
     }
@@ -117,7 +118,7 @@ public:
     }
 
     // Length of the spin chain
-    typename SpinOp<FpType>::IndexType spin_chain_length() const { return len; }
+    auto spin_chain_length() const { return len; }
 
     // Dimension of the Hilbert space.
     IndexType dim() const { return 1 << len; }
@@ -168,8 +169,8 @@ public:
     // algorithm. When finished, the state is set the ground state and the
     // energy is returned. You can optionally specify the Krylov dimension
     // and the tolerance used in the algorithm.
-    FpType ground_state(const SumOps<FpType> &ham, int krydim = 3,
-			FpType eps = 100*epsilon<FpType>()) {
+    FpType ground_state(const typename Impl::template SumOps<FpType> &ham,
+			int krydim = 3, FpType eps = 100*epsilon<FpType>()) {
 	assert(krydim > 1);
 	// We need krydim internal buffers for the krydim Krylov vectors, ie.
 	// v[0] = buf(0), v[1] = buf(1), ..., v[krydim-1] = buf(krydim-1).
@@ -239,31 +240,40 @@ public:
 	return energy;
     }
 
-    ComplexScalar operator[](IndexType i) const {
-	return buf()[i];
-    }
-
-    typename Impl::template ElemRefType<FpType> operator[](IndexType i) {
-	return buf()[i];
-    }
+    auto operator[](IndexType i) const { return buf()[i]; }
+    auto operator[](IndexType i) { return buf()[i]; }
 
     // We must repeat the non-template operator= definition since the template
     // version below does not cover the non-template version (this is similar
     // to the copy-ctor case).
     State &operator=(const State &st) {
 	assert(dim() == st.dim());
-	Impl::copy_vec(dim(), buf(), st.buf());
+	// Guard against self-assignment
+	if (this != &st) {
+	    Impl::copy_vec(dim(), buf(), st.buf());
+	}
 	return *this;
     }
 
-    template<typename FpType1>
+    template<RealScalar FpType1>
     State &operator=(const State<FpType1,Impl> &st) {
 	assert(dim() == st.dim());
 	Impl::copy_vec(dim(), buf(), st.buf());
 	return *this;
     }
 
-    State &operator*=(const SumOps<FpType> &ops) {
+    State &operator+=(const State &rhs) {
+	Impl::add_vec(dim(), buf(), rhs.buf());
+	return *this;
+    }
+
+    State operator+(const State &rhs) const {
+	State res(rhs.len);
+	Impl::add_vec(dim(), res.buf(), buf(), rhs.buf());
+	return res;
+    }
+
+    State &operator*=(const typename Impl::template SumOps<FpType> &ops) {
 	enlarge(2);
 	assert(num_bufs() >= 2);
 	typename Impl::template BufType<FpType> v = buf();
@@ -274,7 +284,7 @@ public:
 	return *this;
     }
 
-    State &operator*=(ComplexScalar s) {
+    State &operator*=(complex<FpType> s) {
 	Impl::scale_vec(dim(), buf(), s);
 	return *this;
     }
@@ -287,14 +297,36 @@ public:
 	*this *= 1.0 / norm();
     }
 
-    friend State operator*(const SumOps<FpType> &ops, const State &s) {
+    friend State operator*(const typename Impl::template SumOps<FpType> &ops,
+			   const State &s) {
 	State res(s.len);
 	res.zero_state();
 	Impl::apply_ops(s.len, res.buf(), ops, s.buf());
 	return res;
     }
 
-    friend ComplexScalar operator*(const State &s0, const State &s1) {
+    friend State operator*(const typename Impl::template SumOps<FpType>::MatrixType &mat,
+			   const State &st) {
+	if (mat.cols() != mat.rows()) {
+	    std::stringstream ss;
+	    ss << "(" << mat.cols() << ") must match its row dimension ("
+	       << mat.rows() << ")";
+	    ThrowException(InvalidArgument, "column dimension of matrix",
+			   ss.str().c_str());
+	}
+	if (mat.cols() != (1LL << st.len)) {
+	    std::stringstream ss;
+	    ss << "(" << mat.cols() << ") must match the dimension of the state ("
+	       << (1LL << st.len) << ")";
+	    ThrowException(InvalidArgument, "column dimension of matrix",
+			   ss.str().c_str());
+	}
+	State res(st.len);
+	Impl::template mat_mul<FpType>(1ULL << st.len, res.buf(), mat, st.buf());
+	return res;
+    }
+
+    friend complex<FpType> operator*(const State &s0, const State &s1) {
 	if (s0.dim() != s1.dim()) {
 	    DbgThrow(InvalidArgument, "Dimensions of states", "must match");
 	}
@@ -328,8 +360,9 @@ public:
     // Evolve the state using the following
     //   |psi> = exp(-(it + beta)H) |psi>
     template<template<typename>typename Algo = DefEvolutionAlgorithm,
-	     typename FpType1, typename FpType2, typename...Args>
-    void evolve(const SumOps<FpType> &ham, FpType1 t, FpType2 beta = 0.0, Args&&...args) {
+	     RealScalar FpType1, RealScalar FpType2, typename...Args>
+    void evolve(const typename Impl::template SumOps<FpType> &ham,
+		FpType1 t, FpType2 beta = 0.0, Args&&...args) {
 	if ((t == 0.0) && (beta == 0.0)) {
 	    return;
 	}
@@ -350,5 +383,90 @@ public:
 	    bufs.pop_back();
 	}
 	curbuf = 0;
+    }
+};
+
+// Represents a state vector in parity block form (ie. column vector of left
+// and right block).
+template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
+struct BlockState : BlockVec<State<FpType,Impl>> {
+    // Note here the spin chain length is the spin chain length of each
+    // parity block, ie. the full Hilbert space dimension is 1<<(len+1).
+    BlockState(typename SpinOp<FpType>::IndexType len)
+	: BlockVec<State<FpType,Impl>>{len, len} {}
+
+    void random_state() {
+	this->L.random_state();
+	this->R.random_state();
+	normalize();
+    }
+
+    void zero_state() { this->L.zero_state(); this->R.zero_state(); }
+
+    // Length of the spin chain.
+    typename SpinOp<FpType>::IndexType spin_chain_length() const {
+	assert(this->L.spin_chain_length() == this->R.spin_chain_length());
+	return this->L.spin_chain_length();
+    }
+
+    // Dimension of the Hilbert space. Note L.dim() might be 2^31 so we need
+    // to cast to size_t.
+    size_t dim() const { return (size_t)(this->L.dim()) * 2; }
+
+    // Construct the ground state of the given Hamiltonian. Each parity block
+    // is computed separately and we normalize the result.
+    FpType ground_state(const BlockDiag<typename Impl::template SumOps<FpType>> &ham,
+			int krydim = 3, FpType eps = 100*epsilon<FpType>()) {
+	auto g0 = this->L.ground_state(ham.LL, krydim, eps);
+	auto g1 = this->R.ground_state(ham.RR, krydim, eps);
+	normalize();
+	return g0 + g1;
+    }
+
+    // The compiler doesn't seem to generate this automatically so
+    // we need to explicitly call the base assignment operator.
+    template<RealScalar FpType1, typename Impl1>
+    BlockState &operator=(const BlockVec<State<FpType1,Impl1>> &st) {
+	BlockVec<State<FpType,Impl>>::operator=(st);
+	return *this;
+    }
+
+    auto operator[](size_t i) const {
+	return i < this->L.dim() ? this->L[i] : this->R[i-this->L.dim()];
+    }
+
+    auto operator[](size_t i) {
+	return i < this->L.dim() ? this->L[i] : this->R[i-this->L.dim()];
+    }
+
+    FpType norm() const {
+	auto nl = this->L.norm();
+	auto nr = this->R.norm();
+	return std::sqrt(nl*nl + nr*nr);
+    }
+
+    void normalize() {
+	*this *= 1.0 / norm();
+    }
+
+    // Evolve the state using the following formula
+    //   |psi> = exp(-(it + beta)H) |psi>
+    template<template<typename>typename Algo = DefEvolutionAlgorithm,
+	     RealScalar FpType1, RealScalar FpType2, typename...Args>
+    void evolve(const BlockDiag<typename Impl::template SumOps<FpType>> &ham,
+		FpType1 t, FpType2 beta = 0.0, Args&&...args) {
+	if ((t == 0.0) && (beta == 0.0)) {
+	    return;
+	}
+	Algo<Impl>::evolve(this->L, ham.LL, static_cast<FpType>(t),
+			   static_cast<FpType>(beta), args...);
+	Algo<Impl>::evolve(this->R, ham.RR, static_cast<FpType>(t),
+			   static_cast<FpType>(beta), std::forward<Args>(args)...);
+    }
+
+    // Release all the internal buffers allocated.
+    void gc() {
+	this->L.gc();
+	this->R.gc();
     }
 };

@@ -26,22 +26,23 @@ Revision History:
 #include "argparser.h"
 
 #ifdef MAX_NUM_FERMIONS
-#define REAPERS_SPIN_SITES	(MAX_NUM_FERMIONS / 2)
+#define REAPERS_SPIN_SITES	(MAX_NUM_FERMIONS/2 - 1)
 #endif
 
-#define REAPERS_USE_MATRIX_POWER
+#define REAPERS_USE_PARITY_BLOCKS
 #include "reapers.h"
 
 using namespace REAPERS;
 using namespace REAPERS::Model;
-template<typename FpType>
+template<RealScalar FpType>
 using MatrixType = typename SumOps<FpType>::MatrixType;
+template<RealScalar FpType>
+using HamOp = typename SYK<FpType>::HamOp;
 
 // Evaluator class for the entanglement entropy of the Lindblad SYK.
 class Eval : protected ArgParser {
     bool gndst;
     bool use_krylov;
-    bool trace;
     int matpow;
     int m;
     float dt;
@@ -59,172 +60,191 @@ class Eval : protected ArgParser {
 	    ("mu", progopts::value<float>(&mu)->required(), "Specify mu.")
 	    ("t0", progopts::value<float>(&t0)->default_value(0.0),
 	     "Specify the starting time point.")
-	    ("matrix-power", progopts::value<int>(&matpow)->default_value(1),
-	     "Specify the order of matrix power expansion when computing exp(-iHt)."
-	     " This option is ignored if --use-krylov is specified.")
-	    ("use-krylov", progopts::bool_switch(&use_krylov)->default_value(false),
-	     "Use the Krylov algorithm for state evolution, instead of expanding the"
-	     " matrix exponential using Taylor series. This is disabled by default."
-	     " When dt is large you should enable it.")
-	    ("trace", progopts::bool_switch(&trace)->default_value(false),
-	     "When computing the purity, use the full trace definition rather than"
-	     " the inner product of initial and final state.");
+	    ("matrix-power", progopts::value<int>(&matpow)->default_value(0),
+	     "Use matrix power expansion when computing exp(-iHt) instead of"
+	     " exact diagonalization and specify the order to which the matrix"
+	     " exponential is expanded. This option cannot be specified if"
+	     " --use-krylov is specified.")
+	    ("use-krylov",
+	     progopts::bool_switch(&use_krylov)->default_value(false),
+	     "Use the Krylov algorithm to compute state evolution instead of exact"
+	     " diagonalization. This is very slow and should only be used for"
+	     " testing purpose.");
     }
 
     bool optcheck_hook() {
+	if (t0 > tmax) {
+	    std::cout << "Starting time cannot be greater than maximum time"
+		      << std::endl;
+	}
 	// If user has specified a data directory, switch to it.
 	std::filesystem::create_directory(data_dir);
 	std::filesystem::current_path(data_dir);
 	return true;
     }
 
-    template<typename FpType, typename FpType1>
-    void evolve(State<FpType> &psi, const HamOp<FpType> &ham, FpType1 t) {
+    template<RealScalar FpType>
+    void evolve(BlockState<FpType> &psi, const HamOp<FpType> &ham, float t) {
 	if (use_krylov) {
-	    psi.template evolve<EvolutionAlgorithm::Krylov>(ham, t, 0, krylov_dim);
-	} else {
-	    psi.evolve(ham, t, 0, matpow);
-	}
-    }
-
-    template<typename FpType, typename RandGen>
-    void step(const SYK<FpType> &syk, const HamOp<FpType> &ham, State<FpType> &psi,
-	      RandGen &rg, float mu, float dt, bool forward) {
-	std::uniform_real_distribution<FpType> unif_real(0,1);
-	std::uniform_int_distribution<int> unif_int(0,N-1);
-	FpType p = 1 - std::exp(-N*mu*dt/2);
-	FpType eps = unif_real(rg);
-	if (p < eps) {
-	    evolve(psi, ham, forward ? dt : -dt);
+	    psi.template evolve<EvolutionAlgorithm::Krylov>(ham, t, 0.0, krylov_dim);
+	} else if (matpow) {
+	    psi.template evolve<EvolutionAlgorithm::MatrixPower>(ham, t, 0.0, matpow);
 	    psi.normalize();
 	} else {
-            psi *= syk.fermion_ops(unif_int(rg));
+	    psi.template evolve<EvolutionAlgorithm::ExactDiagonalization>(ham, t, 0.0);
 	}
     }
 
-    // Simulate one disorder realization
-    template<typename FpType, typename RandGen>
-    void runone(const SYK<FpType> &syk, RandGen &rg, std::ofstream &outf,
-		const std::vector<FpType> &tarray, std::vector<FpType> &entropy) {
-	auto N = syk.num_fermions();
-	auto ham = syk.gen_ham(rg);
-	State<FpType> init(N/2);
-	if (gndst) {
-	    auto gs_energy = init.ground_state(ham);
-	    if (verbose) {
-		std::cout << "Ground state energy " << gs_energy << std::endl;
-	    }
-	    init.gc();
-	} else {
-	    init.random_state();
-	}
-	State<FpType> psi(N/2);
-	for (size_t u = 0; u < tarray.size(); u++) {
-	    auto T = tarray[u];
-	    if (verbose) {
-		std::cout << "Computing time point " << T << std::endl;
-	    }
-	    // Subdivide T into segments of dt and compute the purity
-	    int nseg = (int)(T/dt);
-	    FpType purity = 0.0;
-	    // Compute m quantum trajectories
-	    for (int i = 0; i < m; i++) {
-		psi = init;
-		// Compute the forward evolution
-		for (int j = 0; j < nseg; j++) {
-		    step(syk, ham, psi, rg, mu, dt, true);
-		}
-		// Starting from the result of the forward evolution,
-		// compute the backward evolution
-		for (int j = 0; j < nseg; j++) {
-		    step(syk, ham, psi, rg, mu, dt, false);
-		}
-		// Find the overlap between the final and the initial state
-		auto overlap = norm(init * psi);
-		purity += overlap;
-		if (verbose && !(i % 128)) {
-		    std::cout << "Traj " << i << " done." << std::endl;
-		}
-		outf << T << " " << overlap << std::endl;
-	    }
-	    // Compute the entanglement entropy
-	    purity /= m;
-	    entropy[u] = -std::log(purity)*2/N;
-	    if (verbose) {
-		std::cout << "T = " << T << ", entropy = " << entropy[u] << std::endl;
-	    }
-	}
+    template<RealScalar FpType>
+    void evolve(BlockOp<MatrixType<FpType>> &psi,
+		const HamOp<FpType> &ham, float t) {
+	auto expmat = ham.matexp(complex<FpType>{0,-t}, N/2-1);
+	psi = expmat * psi;
     }
 
-    template<typename FpType, typename RandGen>
-    void step_trace(MatrixType<FpType> &mat, const MatrixType<FpType> &expmat,
-		    const std::vector<MatrixType<FpType>> &ops,
-		    RandGen &rg, float mu, float dt) {
+    // Generate a quantum trajectory (strictly speaking, half of a quantum
+    // trajectory) for time point T. Once the function returns, traj will
+    // be a list of integers [-1, -2, 0, 3, 0, ..], where each positive
+    // integer n represents A^n where A = exp(+/-iHdt) and each non-positive
+    // integer n represents the jump operator psi_{-n}.
+    template<RealScalar FpType, typename RandGen>
+    std::vector<int> gen_traj(const SYK<FpType> &syk, const HamOp<FpType> &ham,
+			      float T, RandGen &rg) {
+	std::vector<int> traj;
 	std::uniform_real_distribution<FpType> unif_real(0,1);
 	std::uniform_int_distribution<int> unif_int(0,N-1);
+	// Subdivide T into segments of dt
+	int nseg = (int)(T/dt);
 	FpType p = 1 - std::exp(-N*mu*dt/2);
-	FpType eps = unif_real(rg);
-	if (p < eps) {
-	    mat = expmat * mat;
-	} else {
-            mat = ops[unif_int(rg)] * mat;
+	int prev = 0;
+	bool extra = false;
+	for (int i = 0; i < nseg; i++) {
+	    FpType eps = unif_real(rg);
+	    if (p < eps) {
+		if (prev <= 0) {
+		    prev = 1;
+		} else {
+		    prev++;
+		}
+		extra = true;
+	    } else {
+		traj.push_back(prev);
+		traj.push_back(-unif_int(rg));
+		prev = 0;
+		extra = false;
+	    }
+	}
+	if (extra) {
+	    traj.push_back(prev);
+	}
+	return traj;
+    }
+
+    template<RealScalar FpType, typename St>
+    void evolve_traj(const SYK<FpType> &syk, St &psi, const HamOp<FpType> &ham,
+		     const std::vector<int> &traj, bool forward) {
+	for (auto n : traj) {
+	    if (n > 0) {
+		FpType t = forward ? (n*dt):(-n*dt);
+		evolve<FpType>(psi, ham, t);
+	    } else {
+		psi = syk.fermion_ops(-n) * psi;
+	    }
 	}
     }
 
-    // Simulate one disorder realization, using the trace definition
-    template<typename FpType, typename RandGen>
-	void runone_trace(const SYK<FpType> &syk, RandGen &rg, std::ofstream &outf,
-			  const std::vector<FpType> &tarray,
-			  std::vector<FpType> &entropy) {
-	auto N = syk.num_fermions();
-	ssize_t dim = 1LL << (N/2);
+    // Compute the purity using the trace method
+    template<RealScalar FpType>
+    double compute_purity(const SYK<FpType> &syk, const HamOp<FpType> &ham,
+			  const std::vector<int> &fwd_traj,
+			  const std::vector<int> &bac_traj) {
+	// Hilbert space dimension of each parity block
+	ssize_t dim = 1LL << (N/2-1);
+	// Initial matrix is the identity matrix
+	BlockOp<MatrixType<FpType>> mat{BlockDiag<MatrixType<FpType>>{
+		MatrixType<FpType>::Identity(dim,dim),
+		MatrixType<FpType>::Identity(dim,dim)}};
+	// Compute the forward evolution
+	evolve_traj(syk, mat, ham, fwd_traj, true);
+	// Starting from the result of the forward evolution,
+	// compute the backward evolution
+	evolve_traj(syk, mat, ham, bac_traj, false);
+	// Compute the trace and divide by the number of matrix elements
+	double tr = abs(mat.trace());
+	return tr * tr / (1ULL << N);
+    }
+
+    // Compute the purity by compute the overlap between initial and final states
+    template<RealScalar FpType>
+    double compute_purity(const SYK<FpType> &syk, const HamOp<FpType> &ham,
+			  const std::vector<int> &fwd_traj,
+			  const std::vector<int> &bac_traj,
+			  const BlockState<FpType> &init) {
+	BlockState<FpType> psi(init);
+	// Compute the forward evolution
+	evolve_traj(syk, psi, ham, fwd_traj, true);
+	// Starting from the result of the forward evolution,
+	// compute the backward evolution
+	evolve_traj(syk, psi, ham, bac_traj, false);
+	// Compute the overlap
+	return norm(psi * init);
+    }
+
+    // Simulate one disorder realization, using the trace definition.
+    template<RealScalar FpType, typename RandGen>
+    void runone(const SYK<FpType> &syk, RandGen &rg, std::ofstream &outf,
+		const std::vector<FpType> &tarray, std::vector<double> &entropy) {
+	// Spin chain length
+	int len = N/2-1;
 	auto ham = syk.gen_ham(rg);
-	std::vector<MatrixType<FpType>> fermion_ops(N);
-	for (int i = 0; i < N; i++) {
-	    fermion_ops[i] = get_matrix(syk.fermion_ops(i), N/2);
+	std::unique_ptr<BlockState<FpType>> init;
+	if (!trace) {
+	    init = std::make_unique<BlockState<FpType>>(len);
+	    if (gndst) {
+		auto gs_energy = init->ground_state(ham);
+		if (verbose) {
+		    std::cout << "Ground state energy " << gs_energy << std::endl;
+		}
+		init->gc();
+	    } else {
+		init->random_state();
+	    }
 	}
-	// Compute the matrix exp(+/-iH*dt) using exact diagonalization.
-	MatrixType<FpType> expfwd = ham.matexp({0, -dt}, N/2);
-	MatrixType<FpType> expbac = ham.matexp({0, dt}, N/2);
 	for (size_t u = 0; u < tarray.size(); u++) {
 	    auto T = tarray[u];
 	    if (verbose) {
 		std::cout << "Computing time point " << T << std::endl;
 	    }
-	    // Subdivide T into segments of dt and compute the purity
-	    int nseg = (int)(T/dt);
-	    FpType purity = 0.0;
+	    double purity = 0.0;
 	    // Compute m quantum trajectories
 	    for (int i = 0; i < m; i++) {
-		MatrixType<FpType> mat = MatrixType<FpType>::Identity(dim,dim);
-		// Compute the forward evolution
-		for (int j = 0; j < nseg; j++) {
-		    step_trace<FpType>(mat, expfwd, fermion_ops, rg, mu, dt);
+		// Generate the forward quantum trajectory
+		auto fwd_traj = gen_traj(syk, ham, T, rg);
+		// Generate the backward quantum trajectory
+		auto bac_traj = gen_traj(syk, ham, T, rg);
+		double overlap = 0.0;
+		if (trace) {
+		    overlap = compute_purity(syk, ham, fwd_traj, bac_traj);
+		} else {
+		    overlap = compute_purity(syk, ham, fwd_traj, bac_traj, *init);
 		}
-		// Starting from the result of the forward evolution,
-		// compute the backward evolution
-		for (int j = 0; j < nseg; j++) {
-		    step_trace<FpType>(mat, expbac, fermion_ops, rg, mu, dt);
-		}
-		// Find the overlap between the final and the initial state
-		FpType tr = abs(mat.trace());
-		FpType overlap = tr * tr / (dim*dim);
-		purity += overlap;
 		if (verbose && !(i % 128)) {
 		    std::cout << "Traj " << i << " done." << std::endl;
 		}
 		outf << T << " " << overlap << std::endl;
+		purity += overlap;
 	    }
 	    // Compute the entanglement entropy
 	    purity /= m;
-	    entropy[u] = -std::log(purity)*2/N;
+	    entropy[u] = -std::log(purity)/N;
 	    if (verbose) {
-		std::cout << "T = " << T << ", entropy = " << entropy[u] << std::endl;
+		std::cout << "T = " << T << ", entropy = " << entropy[u]
+			  << std::endl;
 	    }
 	}
     }
 
-    template <typename FpType>
+    template <RealScalar FpType>
     void runall() {
 	std::stringstream ss;
 	if (trace) {
@@ -240,8 +260,10 @@ class Eval : protected ArgParser {
 	if (!trace) {
 	    if (use_krylov) {
 		ss << "krydim" << krylov_dim;
-	    } else {
+	    } else if (matpow) {
 		ss << "matpow" << matpow;
+	    } else {
+		ss << "ed";
 	    }
 	}
 	std::ofstream outf;
@@ -264,17 +286,15 @@ class Eval : protected ArgParser {
 	if (t0 != 0.0) {
 	    tarray.push_back(t0);
 	}
-	for (int i = 1; i <= nsteps; i++) {
-	    tarray.push_back(t0 + (tmax-t0)*i/nsteps);
-	}
-	std::vector<FpType> entropy_sum(tarray.size());
-	for (int i = 0; i < M; i++) {
-	    std::vector<FpType> entropy(tarray.size());
-	    if (trace) {
-		runone_trace(syk, rg, outf, tarray, entropy);
-	    } else {
-		runone(syk, rg, outf, tarray, entropy);
+	if (t0 != tmax) {
+	    for (int i = 1; i <= nsteps; i++) {
+		tarray.push_back(t0 + (tmax-t0)*i/nsteps);
 	    }
+	}
+	std::vector<double> entropy_sum(tarray.size());
+	for (int i = 0; i < M; i++) {
+	    std::vector<double> entropy(tarray.size());
+	    runone(syk, rg, outf, tarray, entropy);
 	    for (size_t j = 0; j < tarray.size(); j++) {
 		entf << tarray[j] << " " << entropy[j] << std::endl;
 		entropy_sum[j] += entropy[j];
@@ -303,6 +323,8 @@ public:
 	return 0;
     }
 };
+
+
 
 int main(int argc, const char *argv[])
 {

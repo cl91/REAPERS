@@ -14,8 +14,9 @@ using namespace REAPERS::Model;
 using namespace REAPERS::EvolutionAlgorithm;
 using json = nlohmann::json;
 using EigenVals = SumOps<>::EigenVals;
-using MatrixType = SumOps<>::MatrixType;
 using EigenVecs = SumOps<>::EigenVecs;
+using MatrixType = SumOps<>::MatrixType;
+using HamOp = SYK<>::HamOp;
 
 json to_json(const State<> &s) {
     json j;
@@ -84,7 +85,7 @@ struct GenHamRequest {
 
 struct GenHamResponse {
     int N;
-    HamOp<> ham;
+    HamOp ham;
     std::string hamstr;
     GenHamResponse(const GenHamRequest &req) : N(req.N) {
 	SYK syk(N, req.sparsity);
@@ -152,6 +153,18 @@ struct EvolveStateResponse : GenHamResponse {
     }
 };
 
+struct MatexpResponse : GenHamResponse {
+    MatrixType res;
+    MatexpResponse(const EvolveStateRequest &req) : GenHamResponse(req) {
+	res = ham.matexp({-req.beta, -req.t}, req.N/2);
+    }
+    json to_json() const {
+	json js = GenHamResponse::to_json();
+	js["res"] = ::to_json(res);
+	return js;
+    }
+};
+
 void run() {
     json jsn;
     std::cin >> jsn;
@@ -165,6 +178,9 @@ void run() {
 	reply = GetEigenSysResponse(GenHamRequest(params)).to_json();
     } else if (req == "evolve-state") {
 	reply = EvolveStateResponse(EvolveStateRequest(params)).to_json();
+    } else if (req == "matexp") {
+	// matexp shares the same request params as evolve-state
+	reply = MatexpResponse(EvolveStateRequest(params)).to_json();
     } else {
 	throw std::runtime_error(std::string("Unknown request ") + req);
     }

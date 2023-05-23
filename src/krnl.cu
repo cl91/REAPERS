@@ -57,7 +57,7 @@ __global__ static void krnl_vec_add3(ComplexType *a,
     a[id].y = b[id].y + c[id].y;
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 __device__ static __inline CudaComplexType<FpType> cmul(complex<FpType> z1,
 							CudaComplexType<FpType> z2)
 {
@@ -77,7 +77,7 @@ __device__ __inline cuDoubleComplex cmul(cuDoubleComplex z1,
     return CudaComplex<double>::cuCmul(z1, z2);
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 __global__ static void krnl_apply_ops(CudaComplexPtr<FpType> res,
 				      SpinOp<FpType> *ops, int numops,
 				      CudaComplexConstPtr<FpType> vec) {
@@ -107,7 +107,7 @@ __global__ void krnl_copy(ComplexType *diag,
     diag[i].y = mat[i*(blockDim.x*gridDim.x + 1)].y;
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 __global__ void krnl_vec_exp(CudaComplexPtr<FpType> res,
 			     const FpType *v, FpType re, FpType im)
 {
@@ -155,30 +155,30 @@ void GPUImpl::copy_vec(VecSizeType<float> size, BufType<float> v0,
 }
 
 // Compute v0 += v1. v0 and v1 are assumed to point to different buffers.
-template<typename FpType>
-void GPUImpl::add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
-		      ConstBufType<FpType> v1) {
+template<RealScalar FpType>
+void GPUImpl::add_vec(size_t size, complex<FpType> *v0,
+		      const complex<FpType> *v1) {
     int blocksize, gridsize;
     get_block_grid_size(size, blocksize, gridsize);
-    krnl_vec_add<<<gridsize, blocksize>>>((CudaComplexPtr<FpType>)v0.dev_ptr,
-					  (CudaComplexConstPtr<FpType>)v1.dev_ptr);
+    krnl_vec_add<<<gridsize, blocksize>>>((CudaComplexPtr<FpType>)v0,
+					  (CudaComplexConstPtr<FpType>)v1);
     cuda_sync();
 }
 
 // Compute res = v0 + v1. res is assumed to be different from both v0 and v1.
-template<typename FpType>
-void GPUImpl::add_vec(VecSizeType<FpType> size, BufType<FpType> res,
-		      ConstBufType<FpType> v0, ConstBufType<FpType> v1) {
+template<RealScalar FpType>
+void GPUImpl::add_vec(size_t size, complex<FpType> *res,
+		      const complex<FpType> *v0, const complex<FpType> *v1) {
     int blocksize, gridsize;
     get_block_grid_size(size, blocksize, gridsize);
-    krnl_vec_add3<<<gridsize, blocksize>>>((CudaComplexPtr<FpType>)res.dev_ptr,
-					   (CudaComplexConstPtr<FpType>)v0.dev_ptr,
-					   (CudaComplexConstPtr<FpType>)v1.dev_ptr);
+    krnl_vec_add3<<<gridsize, blocksize>>>((CudaComplexPtr<FpType>)res,
+					   (CudaComplexConstPtr<FpType>)v0,
+					   (CudaComplexConstPtr<FpType>)v1);
     cuda_sync();
 }
 
 // Compute res = ops * vec. res and vec are assumed to be different.
-template<typename FpType>
+template<RealScalar FpType>
 void GPUImpl::apply_ops(typename SpinOp<FpType>::IndexType len, BufType<FpType> res,
 			const SumOps<FpType> &ops, ConstBufType<FpType> vec) {
     ops.upload(len);
@@ -196,7 +196,7 @@ void GPUImpl::apply_ops(typename SpinOp<FpType>::IndexType len, BufType<FpType> 
 }
 
 // Set the given matrix to the identity matrix.
-template<typename FpType>
+template<RealScalar FpType>
 void GPUImpl::eye(typename DevSumOps<FpType>::MatrixType &res) {
     assert(res.rowdim == res.coldim);
     CUDA_CALL(cudaMemset(res.dev_ptr, 0, res.datasize()));
@@ -206,7 +206,7 @@ void GPUImpl::eye(typename DevSumOps<FpType>::MatrixType &res) {
     cuda_sync();
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 complex<FpType> GPUImpl::mat_tr(const typename DevSumOps<FpType>::MatrixType &mat) {
     assert(mat.coldim == mat.rowdim);
     typename DevSumOps<FpType>::MatrixType diag(mat.rowdim, 1);
@@ -220,7 +220,7 @@ complex<FpType> GPUImpl::mat_tr(const typename DevSumOps<FpType>::MatrixType &ma
 			  thrust::plus<complex<FpType>>());
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 void GPUImpl::exp_vec(typename DevSumOps<FpType>::MatrixType &res,
 		      const FpType *v, complex<FpType> c) {
     assert(res.coldim == 1);
@@ -231,7 +231,7 @@ void GPUImpl::exp_vec(typename DevSumOps<FpType>::MatrixType &res,
     cuda_sync();
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 void GPUImpl::scale_vecs(typename DevSumOps<FpType>::MatrixType &res,
 			 const typename DevSumOps<FpType>::MatrixType &v,
 			 const typename DevSumOps<FpType>::MatrixType &lambda,
@@ -253,14 +253,14 @@ void GPUImpl::scale_vecs(typename DevSumOps<FpType>::MatrixType &res,
 }
 
 // We need the explicit template instantiations below due to link error.
-template void GPUImpl::add_vec(VecSizeType<float> size, BufType<float> v0,
-			       ConstBufType<float> v1);
-template void GPUImpl::add_vec(VecSizeType<double> size, BufType<double> v0,
-			       ConstBufType<double> v1);
-template void GPUImpl::add_vec(VecSizeType<float> size, BufType<float> res,
-			       ConstBufType<float> v0, ConstBufType<float> v1);
-template void GPUImpl::add_vec(VecSizeType<double> size, BufType<double> res,
-			       ConstBufType<double> v0, ConstBufType<double> v1);
+template void GPUImpl::add_vec(size_t size, complex<float> *v0,
+			       const complex<float> *v1);
+template void GPUImpl::add_vec(size_t size, complex<double> *v0,
+			       const complex<double> *v1);
+template void GPUImpl::add_vec(size_t size, complex<float> *res,
+			       const complex<float> *v0, const complex<float> *v1);
+template void GPUImpl::add_vec(size_t size, complex<double> *res,
+			       const complex<double> *v0, const complex<double> *v1);
 template void GPUImpl::apply_ops(typename SpinOp<float>::IndexType len,
 				 BufType<float> res,
 				 const SumOps<float> &ops,

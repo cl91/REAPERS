@@ -54,6 +54,7 @@ public:
     float sparsity;
     float tmax;
     int krylov_dim;
+    bool trace;
 
     ArgParser() : optdesc("Allowed options") {}
 
@@ -81,7 +82,10 @@ public:
 	     "If non-zero, simulate a sparse SYK with kN connections "
 	     "rather than a fully connected dense SYK.")
 	    ("krydim", progopts::value<int>(&krylov_dim)->default_value(5),
-	     "Specifies the dimension of the Krylov subspace. Default value is 5.");
+	     "Specifies the dimension of the Krylov subspace. Default value is 5.")
+	    ("trace", progopts::bool_switch(&trace)->default_value(false),
+	     "When computing the n-point function or purity, use the full trace"
+	     " definition rather than the inner product of initial and final state.");
 
 	// Let our children add their own supported options.
 	parse_hook();

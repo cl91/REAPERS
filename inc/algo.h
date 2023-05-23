@@ -27,11 +27,11 @@ Revision History:
 // Compute the state evolution by expanding the matrix exponential to n-th power
 template<typename Impl>
 class MatrixPower {
-    template<typename FpType>
+    template<RealScalar FpType>
     using SumOps = typename Impl::template SumOps<FpType>;
 public:
     // Compute s = exp(-(beta+it)H) * s by expanding to the n-th power.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void evolve(State<FpType, Impl> &s, const SumOps<FpType> &ops,
 		       FpType t, FpType beta = 0.0, int n = 1) {
 	auto dim = s.dim();
@@ -61,10 +61,10 @@ public:
 // Compute the state evolution using exact diagonalization.
 template<typename Impl>
 class ExactDiagonalization {
-    template<typename FpType>
+    template<RealScalar FpType>
     using SumOps = typename Impl::template SumOps<FpType>;
 public:
-    template<typename FpType>
+    template<RealScalar FpType>
     static void evolve(State<FpType, Impl> &s, const SumOps<FpType> &ops,
 		       FpType t, FpType beta = 0.0) {
 	s.enlarge(2);
@@ -77,18 +77,20 @@ public:
 // Compute the state evolution using the Krylov subspace method.
 template<typename Impl>
 class Krylov {
+    template<RealScalar FpType>
+    using SumOps = typename Impl::template SumOps<FpType>;
     // Low dimensional complex matrices that are stored and computed on the host
-    template<typename FpType>
+    template<RealScalar FpType>
     using SmallMat = Eigen::Matrix<std::complex<FpType>, Eigen::Dynamic, Eigen::Dynamic>;
 
-    template<typename FpType>
+    template<RealScalar FpType>
     using SmallVec = Eigen::Matrix<std::complex<FpType>, Eigen::Dynamic, 1>;
 
     // Orthogonalize buf(j+1) against buf(0) through buf(j) using the iterative
     // (classical) Gram-Schmidt algorithm. Returns false if orthogonalization has failed.
     // The orthogonalization coefficients will written to the H matrix, unless j is
     // equal to (m-1). The norm of the final vector is written to beta.
-    template<typename FpType>
+    template<RealScalar FpType>
     static bool orthogonalize(State<FpType, Impl> &s, SmallMat<FpType> &H, int j, int m,
 			      FpType &beta, FpType eta = 1/sqrt(2), int max_iters = 3) {
 	auto dim = s.dim();
@@ -156,7 +158,7 @@ class Krylov {
     //
     //   To create an Arnoldi factorization from scratch, set k = 0 and make sure the
     //   current buffer index points to the normalized initial vector.
-    template<typename FpType>
+    template<RealScalar FpType>
     static bool arnoldi(State<FpType,Impl> &s, const SumOps<FpType> &A,
 			SmallMat<FpType> &H, int k, int &m, FpType &beta) {
 	assert(k >= 0);
@@ -195,7 +197,7 @@ public:
     //   SIAM J. Numer. Anal. Vol. 44, No. 6, pp. 2481-2504
     //
     // This is the exact same algorithm implemented by slepc that dynamite calls.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void evolve(State<FpType,Impl> &s, const SumOps<FpType> &ops, FpType t_real,
 		       FpType t_imag = 0.0, int krydim = 5,
 		       FpType tol = epsilon<FpType>(), int max_iters = 0) {

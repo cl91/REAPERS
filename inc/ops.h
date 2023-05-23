@@ -74,12 +74,12 @@ constexpr complex<double> operator""_id(long double d)
     return complex<double>{0.0, static_cast<double>(d)};
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 constexpr inline bool operator==(const complex<FpType> &lhs, long double rhs) {
     return lhs == static_cast<FpType>(rhs);
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 constexpr inline bool operator==(long double lhs, const complex<FpType> &rhs) {
     return static_cast<FpType>(lhs) == rhs;
 }
@@ -94,12 +94,12 @@ constexpr inline bool operator==(const complex<double> &lhs,
     return lhs == static_cast<complex<double>>(rhs);
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 constexpr inline bool operator!=(const complex<FpType> &lhs, long double rhs) {
     return lhs != static_cast<FpType>(rhs);
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 constexpr inline bool operator!=(long double lhs, const complex<FpType> &rhs) {
     return static_cast<FpType>(lhs) != rhs;
 }
@@ -115,7 +115,7 @@ constexpr inline bool operator!=(const complex<double> &lhs,
 }
 
 // This class represents a spin operator.
-template<typename FpType = DefFpType>
+template<RealScalar FpType = DefFpType>
 class SpinOp {
 public:
     // Integer type for the spin site index, eg. for spin state |011001>, there are
@@ -128,8 +128,6 @@ public:
     // Integer type for the internal representation of a spin operator. We use two
     // bits for each spin site, so this is always twice as wide as StateType.
     using ReprType = u64;
-
-    using ComplexScalar = complex<FpType>;
 
 private:
     static constexpr u8 SPIN_SHIFT = 2;
@@ -162,24 +160,24 @@ private:
 	}
     }
 
-    ComplexScalar coeff;
+    complex<FpType> coeff;
     ReprType bits;
 
-    template<typename FpType1>
+    template<RealScalar FpType1>
     friend class SpinOp;
 
     // This is needed so HostSumOps and DevSumOps can access the coeff and bits
     // members in operator+=().
-    template<typename FpType1>
+    template<RealScalar FpType1>
     friend class HostSumOps;
 #ifndef REAPERS_NOGPU
-    template<typename FpType1>
+    template<RealScalar FpType1>
     friend class DevSumOps;
 #endif
 
     // This is marked as private as the end user should use the static members
     // functions below to construct spin operators.
-    SpinOp(ComplexScalar coeff, ReprType bits) : coeff(coeff), bits(bits) {}
+    SpinOp(complex<FpType> coeff, ReprType bits) : coeff(coeff), bits(bits) {}
 
     friend std::ostream &operator<<(std::ostream &os, const Sigma &s) {
 	switch (s) {
@@ -268,7 +266,7 @@ private:
     };
 
 public:
-    template<typename FpType1>
+    template<RealScalar FpType1>
     explicit SpinOp(const SpinOp<FpType1> &op) : coeff(op.coeff), bits(op.bits) {}
 
     static SpinOp zero() {
@@ -294,13 +292,13 @@ public:
 	return SpinOp(1, ReprType(Sigma::z) << (n*2));
     }
 
-    SpinOp &operator*=(ComplexScalar s) {
+    SpinOp &operator*=(complex<FpType> s) {
 	coeff *= s;
 	return *this;
     }
 
-    SpinOp &operator/=(ComplexScalar s) {
-	coeff *= ComplexScalar{1.0,0.0}/s;
+    SpinOp &operator/=(complex<FpType> s) {
+	coeff *= complex<FpType>{1.0,0.0}/s;
 	return *this;
     }
 
@@ -310,11 +308,11 @@ public:
 	return *this;
     }
 
-    friend SpinOp operator*(ComplexScalar s, SpinOp op) {
+    friend SpinOp operator*(complex<FpType> s, SpinOp op) {
 	return SpinOp(op.coeff * s, op.bits);
     }
 
-    SpinOp operator*(ComplexScalar s) {
+    SpinOp operator*(complex<FpType> s) {
 	return SpinOp(coeff * s, bits);
     }
 
@@ -332,8 +330,9 @@ public:
 	return (bits == other.bits) && (coeff == other.coeff);
     }
 
-    bool operator!=(const SpinOp &other) const {
-	return !operator==(other);
+    template<ScalarType S>
+    bool operator==(S s) const {
+	return is_scalar() && (coeff == s);
     }
 
     // Returns an iterator at the zeroth spin site
@@ -360,7 +359,7 @@ public:
     //             ( i   0 )
     //
     // as opposed to the sy matrix defined above.
-    ComplexScalar coefficient() const {
+    complex<FpType> coefficient() const {
 	int sy_count = count_sy();
 	if (sy_count == 0) {
 	    return coeff;
@@ -385,7 +384,7 @@ public:
 
     // Compute the trace of the operator. We note that the trace is always zero
     // for non-identity operators, so this is in fact trivial to compute.
-    DEVHOST ComplexScalar trace(int spin_chain_length) const {
+    DEVHOST complex<FpType> trace(int spin_chain_length) const {
 	if (is_scalar()) {
 	    return coeff * FpType(1ULL << spin_chain_length);
 	} else {
@@ -415,7 +414,7 @@ public:
     // Note although in our convention, sx.sz = sy, for the spin state index n we
     // apply sx first and then sy. In other words, it's a contra-variant functor.
     // This is why we define sx to be 0b01 and sz to be 0b10.
-    DEVHOST ComplexScalar apply(StateType n, StateType &res) const {
+    DEVHOST complex<FpType> apply(StateType n, StateType &res) const {
 	bool minus = false;
 	ReprType b = bits;
 	for (int i = 0; i < NUM_SPIN_SITES; i++) {
@@ -587,7 +586,7 @@ public:
 	    os << "0";
 	    return os;
 	}
-	ComplexScalar coeff = op.coefficient();
+	complex<FpType> coeff = op.coefficient();
 	if (coeff != 1.0 && coeff != -1.0) {
 	    if (coeff == 1.0_i) {
 		os << "i";
@@ -605,7 +604,7 @@ public:
 	    os << "-";
 	}
 	if (op.is_scalar()) {
-	    os << "I";
+	    os << "Id";
 	    return os;
 	}
 	bool dot = false;

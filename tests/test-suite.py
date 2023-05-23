@@ -6,6 +6,7 @@
 import os, subprocess, json, argparse
 import numpy as np
 import dynamite.computations as cp
+from scipy.linalg import expm
 from dynamite.states import State
 from dynamite.operators import identity, sigmax, sigmay, sigmaz, op_sum
 
@@ -181,9 +182,7 @@ def to_dynamite_state(s):
 
 # Define the tests we are going to run
 def gen_ham_genreq(N):
-    return {"request" : "gen-ham", "params" : { "N" : N,
-                                                "sparsity" : 0.0,
-                                                "regularize" : False }}
+    return { "N" : N, "sparsity" : 0.0, "regularize" : False }
 
 def gen_ham_test(req, reply):
     spinlen = (int)(reply["N"]/2)
@@ -192,10 +191,15 @@ def gen_ham_test(req, reply):
     mat = cmat_to_numpy(reply["mat"])
     return almost_equal(dyn_mat, mat)
 
+def gen_ham_printnorm(req, reply):
+    spinlen = (int)(reply["N"]/2)
+    dyn_ops = to_dynamite_opsum(reply["ham"], spinlen)
+    dyn_mat = pestc_mat_to_numpy(dyn_ops.get_mat(), spinlen)
+    mat = cmat_to_numpy(reply["mat"])
+    print(f"Diff norm of dynamite mat vs ours {diff_norm(dyn_mat, mat)}")
+
 def get_eigensys_genreq(N):
-    return {"request" : "get-eigensys", "params" : { "N" : N,
-                                                     "sparsity" : 0.0,
-                                                     "regularize" : False }}
+    return { "N" : N, "sparsity" : 0.0, "regularize" : False }
 
 def get_eigensys_test(req, reply):
     spinlen = (int)(reply["N"]/2)
@@ -217,14 +221,10 @@ def get_eigensys_test(req, reply):
     return almost_equal(dyn_mat.dot(evecs), evecs.dot(np.diag(evals)))
 
 def evolve_state_genreq(N, t, beta, exdiag = False):
-    return {"request" : "evolve-state", "params" : { "N" : N,
-                                                     "sparsity" : 0.0,
-                                                     "regularize" : False,
-                                                     "t" : t,
-                                                     "beta" : beta,
-                                                     "exdiag" : exdiag }}
+    return { "N" : N, "sparsity" : 0.0, "regularize" : False,
+             "t" : t, "beta" : beta, "exdiag" : exdiag }
 
-def evolve_state_test(req, reply):
+def evolve_state_get_result(req, reply):
     spinlen = (int)(reply["N"]/2)
     t = req["t"]
     beta = req["beta"]
@@ -237,29 +237,53 @@ def evolve_state_test(req, reply):
         expevals = np.exp((-beta-1j*t)*evals)
         expmat = evecs.dot(np.diag(expevals)).dot(np.conj(np.transpose(evecs)))
         exdiag_final_state = np.matmul(expmat, init_state)
-        return almost_equal(final_state, exdiag_final_state)
+        return (final_state, exdiag_final_state)
     else:
         dyn_init_state = to_dynamite_state(reply["init-state"])
         dyn_final_state = dyn_ops.evolve(dyn_init_state, t-1j*beta, algo='krylov')
-        return almost_equal(final_state, dyn_final_state.vec.getArray())
+        return (final_state, dyn_final_state.vec.getArray())
+
+def evolve_state_test(req, reply):
+    return almost_equal(*evolve_state_get_result(req, reply))
 
 def evolve_state_printnorm(req, reply):
+    res = diff_norm(*evolve_state_get_result(req, reply))
+    print(f"{reply['N']} {t} {beta} {res}")
+
+# We reuse the parameters of evolve-state
+def matexp_genreq(N, t, beta, exdiag = False):
+    return evolve_state_genreq(N, t, beta, exdiag)
+
+def matexp_get_result(req, reply):
     spinlen = (int)(reply["N"]/2)
     t = req["t"]
     beta = req["beta"]
     dyn_ops = to_dynamite_opsum(reply["ham"], spinlen)
-    init_state = cvec_to_numpy(reply["init-state"]["vec"])
-    final_state = cvec_to_numpy(reply["final-state"]["vec"])
-    dyn_init_state = to_dynamite_state(reply["init-state"])
-    dyn_final_state = dyn_ops.evolve(dyn_init_state, t-1j*beta, algo='krylov')
-    res = diff_norm(final_state, dyn_final_state.vec.getArray())
+    res = cmat_to_numpy(reply["res"])
+    dyn_mat = pestc_mat_to_numpy(dyn_ops.get_mat(), spinlen)
+    if req["exdiag"]:
+        (evals, evecs) = np.linalg.eigh(dyn_mat)
+        expevals = np.exp((-beta-1j*t)*evals)
+        res_numpy = evecs.dot(np.diag(expevals)).dot(np.conj(np.transpose(evecs)))
+    else:
+        res_numpy = expm(dyn_mat)
+    return (res, res_numpy)
+
+def matexp_test(req, reply):
+    return almost_equal(*matexp_get_result(req, reply))
+
+def matexp_printnorm(req, reply):
+    res = diff_norm(*matexp_get_result(req, reply))
     print(f"{reply['N']} {t} {beta} {res}")
 
 tests = { "gen-ham" : (gen_ham_genreq, gen_ham_test),
           "get-eigensys" : (get_eigensys_genreq, get_eigensys_test),
-          "evolve-state" : (evolve_state_genreq, evolve_state_test) }
+          "evolve-state" : (evolve_state_genreq, evolve_state_test),
+          "matexp" : (matexp_genreq, matexp_test) }
 
-funclets = { "evolve-state" : (evolve_state_genreq, evolve_state_printnorm) }
+funclets = { "gen-ham" : (gen_ham_genreq, gen_ham_printnorm),
+             "evolve-state" : (evolve_state_genreq, evolve_state_printnorm),
+             "matexp" : (matexp_genreq, matexp_printnorm) }
 
 # Get the test or funclet to run
 def get(name, d, ty_str):
@@ -271,7 +295,7 @@ def get(name, d, ty_str):
 # Generate and submit the request and parse the service response
 def run(req_gen, cfg_param_list):
     params = [eval(e) for e in cfg_param_list[1:]]
-    req = req_gen(*params)
+    req = { "request" : cfg_param_list[0], "params" : req_gen(*params) }
     reqjson = json.dumps(req)
     reply = json.loads(run_exec(reqjson))
     return (req, reply)

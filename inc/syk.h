@@ -24,12 +24,13 @@ Revision History:
 #include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
 #endif
 
-template<typename FpType = DefFpType>
+template<RealScalar FpType = DefFpType, typename Impl = DefImpl,
+	 template<typename, typename> typename FermionOpTmpl = FermionOp>
 class SYK {
     int N;
     FpType sp;
     bool standard_gamma;
-    std::vector<FermionOp<FpType>> gamma;
+    std::vector<FermionOpTmpl<FpType,Impl>> gamma;
     FpType scale;
     FpType p;
 
@@ -80,6 +81,9 @@ class SYK {
     }
 
 public:
+    using FermionOpType = FermionOpTmpl<FpType,Impl>;
+    using HamOp = typename FermionOpTmpl<FpType,Impl>::ProductType;
+
     // Specify standard_gamma=false if you want {gamma_i,gamma_j}=2delta_ij.
     SYK(int N, FpType sp, FpType J = 1.0, bool standard_gamma = true)
 	: N(N), sp(sp), standard_gamma(standard_gamma) {
@@ -110,7 +114,7 @@ public:
 	    scale /= sqrt(p);
 	}
 	for (int i = 0; i < N; i++) {
-	    gamma.emplace_back(FermionOp<FpType>(N, i));
+	    gamma.emplace_back(FermionOpType(N, i, standard_gamma));
 	}
     }
 
@@ -122,14 +126,14 @@ public:
 
     bool is_sparse() const { return sp != 0.0; }
 
-    const FermionOp<FpType> &fermion_ops(int n) const {
+    const FermionOpType &fermion_ops(int n) const {
 	if (!(n >= 0) && (n < N)) {
 	    ThrowException(InvalidArgument, "n", "must be in [0,N)");
 	}
 	return gamma[n];
     }
 
-    const std::vector<FermionOp<FpType>> &fermion_ops() const {
+    const std::vector<FermionOpType> &fermion_ops() const {
 	return gamma;
     }
 
@@ -146,7 +150,7 @@ public:
     //     PHYSICAL REVIEW D 103, 106002 (2021)
     // [2] A Sparse Model of Quantum Holography, arxiv.org/abs/2008.02303
     template<typename RandGen>
-    HamOp<FpType> gen_ham_regularized(RandGen &gen) const {
+    HamOp gen_ham_regularized(RandGen &gen) const {
 	// If you want a regularized sparse SYK, you can only specify
 	// a sparsity k = n/4 where n in an integer.
 	if ((float)((int)(4*sp)) != 4*sp) {
@@ -217,14 +221,14 @@ public:
 	}
 	// We have a 4k-regular hypergraph, so construct the sparse SYK.
 	std::normal_distribution<FpType> norm(0.0, 1.0);
-	HamOp<FpType> ham;
+	HamOp ham;
 	for (auto edge : edges) {
 	    auto sg = standard_gamma;
 	    u8 i, j, k, l;
 	    std::tie(i,j,k,l) = edge;
-	    ham += scale * norm(gen) * FermionOp<FpType>(N, i, sg)
-		* FermionOp<FpType>(N, j, sg) * FermionOp<FpType>(N, k, sg)
-		* FermionOp<FpType>(N, l, sg);
+	    ham += scale * norm(gen) * FermionOpType(N, i, sg)
+		* FermionOpType(N, j, sg) * FermionOpType(N, k, sg)
+		* FermionOpType(N, l, sg);
 	}
 	return ham;
     }
@@ -232,11 +236,11 @@ public:
     // Generates the Hamiltonian for the standard single SYK model.
     // If sparsity is zero, it generates dense SYK. Otherwise it's sparse.
     template<typename RandGen>
-    HamOp<FpType> gen_ham(RandGen &gen, bool regularize = false) const {
+    HamOp gen_ham(RandGen &gen, bool regularize = false) const {
 	if (regularize && sp != 0.0) {
 	    return gen_ham_regularized(gen);
 	}
-	HamOp<FpType> ham;
+	HamOp ham;
 	std::normal_distribution<FpType> norm(0.0, 1.0);
 	std::bernoulli_distribution bern(p);
 	for (int i = 0; i < N; i++) {
@@ -247,9 +251,9 @@ public:
 			    continue;
 			}
 			auto sg = standard_gamma;
-			ham += scale * norm(gen) * FermionOp<FpType>(N, i, sg)
-			    * FermionOp<FpType>(N, j, sg) * FermionOp<FpType>(N, k, sg)
-			    * FermionOp<FpType>(N, l, sg);
+			ham += scale * norm(gen) * FermionOpType(N, i, sg)
+			    * FermionOpType(N, j, sg) * FermionOpType(N, k, sg)
+			    * FermionOpType(N, l, sg);
 		    }
 		}
 	    }

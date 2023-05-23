@@ -69,7 +69,7 @@ Revision History:
 // cuda::std::complex so we need to convert between them. Fortunately
 // they both have the same in-memory layout so we can trivially
 // convert their pointers.
-template<typename FpType>
+template<RealScalar FpType>
 struct CudaComplex;
 
 template<>
@@ -106,15 +106,15 @@ struct CudaComplex<double> {
     static constexpr auto cublas_gemm = cublasZgemm_64;
 };
 
-template<typename FpType>
+template<RealScalar FpType>
 using CudaComplexType = typename CudaComplex<FpType>::Type;
-template<typename FpType>
+template<RealScalar FpType>
 using CudaComplexPtr = CudaComplexType<FpType> *;
-template<typename FpType>
+template<RealScalar FpType>
 using CudaComplexConstPtr = const CudaComplexType<FpType> *;
 
 // This class represents a sum of spin operators in device memory
-template<typename FpType>
+template<RealScalar FpType>
 class DevSumOps : public HostSumOps<FpType> {
     friend class GPUImpl;
 
@@ -168,10 +168,12 @@ public:
 	    allocate(rowdim, coldim);
 	}
 
+	FpType mat_norm() const;
+
     public:
 	// Eigen3 defines rows() and cols() as returning ssize_t so we follow them.
 	ssize_t rows() const { return (ssize_t)rowdim; }
-	ssize_t cols() const { return (ssize_t)rowdim; }
+	ssize_t cols() const { return (ssize_t)coldim; }
 	ssize_t size() const { return rows() * cols(); }
 
 	// Likewise for resize(). Eigen3 defines resize() to take signed integers.
@@ -229,7 +231,42 @@ public:
 	    return res;
 	}
 
+	bool operator==(const MatrixType &other) const {
+	    // Treat the special case of a zero-dimensional matrix
+	    if (rowdim == 0 || coldim == 0) {
+		return other.rowdim == 0 || other.coldim == 0;
+	    }
+	    // If the dimensions don't match, the matrices aren't equal
+	    if (rowdim != other.rowdim || coldim != other.coldim) {
+		return false;
+	    }
+	    // Otherwise, compute the norm of the difference
+	    auto diff = *this - other;
+	    return diff.mat_norm() == 0;
+	}
+
+	MatrixType &operator+=(const MatrixType &other);
+	friend MatrixType operator+(const MatrixType &m0, const MatrixType &m1) {
+	    MatrixType res(m0);
+	    res += m1;
+	    return res;
+	}
+	MatrixType &operator-=(const MatrixType &other);
+	friend MatrixType operator-(const MatrixType &m0, const MatrixType &m1) {
+	    MatrixType res(m0);
+	    res -= m1;
+	    return res;
+	}
 	MatrixType operator*(const MatrixType &other) const;
+	MatrixType &operator*=(complex<FpType> c);
+	friend MatrixType operator*(complex<FpType> c, const MatrixType &m) {
+	    MatrixType res(m);
+	    res *= c;
+	    return res;
+	}
+	friend MatrixType operator*(const MatrixType &m, complex<FpType> c) {
+	    return c * m;
+	}
 	complex<FpType> trace() const;
     };
 
@@ -292,7 +329,7 @@ public:
 	: HostSumOps<FpType>(op), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
     DevSumOps(const DevSumOps &ops)
 	: HostSumOps<FpType>(ops), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
-    template<typename FpType1>
+    template<RealScalar FpType1>
     explicit DevSumOps(const DevSumOps<FpType1> &ops)
 	: HostSumOps<FpType>(ops), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
     explicit DevSumOps(const HostSumOps<FpType> &ops)
@@ -331,19 +368,18 @@ public:
 
 // Class that implements basic vector operations on the GPU using CUDA.
 class GPUImpl {
-    template<typename FpType>
+    template<RealScalar FpType>
     friend class DevSumOps;
-    template<typename FpType>
+    template<RealScalar FpType>
     friend class DevSumOps<FpType>::MatrixType;
 
     // This class represents a vector in device memory. Note the end user
     // is not supposed to access this object directly (they should access
     // it via the State object) so we explicitly disable the copy ctor and
     // (both copy and move) assignment operators.
-    template<typename FpType>
+    template<RealScalar FpType>
     class DeviceVec {
-	using ComplexScalar = complex<FpType>;
-	ComplexScalar *dev_ptr;
+	complex<FpType> *dev_ptr;
 	size_t dim;
 	friend class GPUImpl;
 	DeviceVec(const DeviceVec &) = delete;
@@ -354,15 +390,15 @@ class GPUImpl {
 	    size_t idx;
 	public:
 	    ElemRefType(DeviceVec &vec, size_t idx) : vec(vec), idx(idx) {}
-	    ElemRefType &operator=(ComplexScalar s) {
-		CUDA_CALL(cudaMemcpy(vec.dev_ptr+idx, &s, sizeof(ComplexScalar),
+	    ElemRefType &operator=(complex<FpType> s) {
+		CUDA_CALL(cudaMemcpy(vec.dev_ptr+idx, &s, sizeof(complex<FpType>),
 				     cudaMemcpyHostToDevice));
 		return *this;
 	    }
 	};
     public:
 	DeviceVec(size_t dim) : dim(dim) {
-	    cuda_alloc(dev_ptr, dim * sizeof(ComplexScalar));
+	    cuda_alloc(dev_ptr, dim * sizeof(complex<FpType>));
 	}
 
 	DeviceVec(DeviceVec &&v) : dim(v.dim) {
@@ -371,14 +407,14 @@ class GPUImpl {
 	}
 
 	explicit DeviceVec(const CPUImpl::VecType<FpType> &v) : dim(v.dimension()) {
-	    cuda_alloc(dev_ptr, dim * sizeof(ComplexScalar));
-	    CUDA_CALL(cudaMemcpy(dev_ptr, v.get(), dim * sizeof(ComplexScalar),
+	    cuda_alloc(dev_ptr, dim * sizeof(complex<FpType>));
+	    CUDA_CALL(cudaMemcpy(dev_ptr, v.get(), dim * sizeof(complex<FpType>),
 				 cudaMemcpyHostToDevice));
 	}
 
 	explicit operator CPUImpl::VecType<FpType>() const {
 	    CPUImpl::VecType<FpType> v(dim);
-	    CUDA_CALL(cudaMemcpy(v.get(), dev_ptr, dim * sizeof(ComplexScalar),
+	    CUDA_CALL(cudaMemcpy(v.get(), dev_ptr, dim * sizeof(complex<FpType>),
 				 cudaMemcpyDeviceToHost));
 	    return v;
 	}
@@ -425,31 +461,31 @@ class GPUImpl {
     inline static GPUContext ctx;
 
 public:
-    template<typename FpType>
+    template<RealScalar FpType>
     using VecType = DeviceVec<FpType>;
 
-    template<typename FpType>
+    template<RealScalar FpType>
     using VecSizeType = typename SpinOp<FpType>::StateType;
 
-    template<typename FpType>
+    template<RealScalar FpType>
     using BufType = DeviceVec<FpType> &;
 
-    template<typename FpType>
+    template<RealScalar FpType>
     using ConstBufType = const DeviceVec<FpType> &;
 
-    template<typename FpType>
+    template<RealScalar FpType>
     using ElemRefType = typename DeviceVec<FpType>::ElemRefType;
 
-    template<typename FpType>
+    template<RealScalar FpType>
     using SumOps = DevSumOps<FpType>;
 
 private:
-    template<typename FpType>
+    template<RealScalar FpType>
     static curandStatus_t gen_norm(FpType *vec, size_t n) {
 	return CudaComplex<FpType>::gen_norm(ctx.randgen, vec, n, 0.0, 1.0);
     }
 
-    template<typename FpType>
+    template<RealScalar FpType>
     static cublasStatus_t cublas_axpy(VecSizeType<FpType> n, complex<FpType> s,
 				      const complex<FpType> *x, complex<FpType> *y) {
 	return CudaComplex<FpType>::cublas_axpy(ctx.hcublas, n,
@@ -458,7 +494,7 @@ private:
 						(CudaComplexPtr<FpType>)y, 1);
     }
 
-    template<typename FpType>
+    template<RealScalar FpType>
     static cublasStatus_t cublas_scal(VecSizeType<FpType> n, FpType s,
 				      complex<FpType> *x) {
 	// n*2 might exceed 2^32 so we need to be careful with integer casting.
@@ -466,7 +502,7 @@ private:
 	return CudaComplex<FpType>::cublas_scal(ctx.hcublas, n2, &s, (FpType *)x, 1);
     }
 
-    template<typename FpType>
+    template<RealScalar FpType>
     static cublasStatus_t cublas_scal(VecSizeType<FpType> n, complex<FpType> s,
 				      complex<FpType> *x) {
 	return CudaComplex<FpType>::cublas_cscal(ctx.hcublas, n,
@@ -474,7 +510,7 @@ private:
 						 (CudaComplexPtr<FpType>)x, 1);
     }
 
-    template<typename FpType>
+    template<RealScalar FpType>
     static cublasStatus_t cublas_dotc(VecSizeType<FpType> n,
 				      complex<FpType> &res,
 				      const complex<FpType> *x,
@@ -485,14 +521,14 @@ private:
 						(CudaComplexPtr<FpType>)&res);
     }
 
-    template<typename FpType>
+    template<RealScalar FpType>
     static cublasStatus_t cublas_nrm2(VecSizeType<FpType> n, FpType &res,
 				      const complex<FpType> *x) {
 	return CudaComplex<FpType>::cublas_nrm2(ctx.hcublas, n,
 						(CudaComplexConstPtr<FpType>)x, 1, &res);
     }
 
-    template<typename FpType>
+    template<RealScalar FpType>
     static cublasStatus_t cublas_gemv(size_t rowdim, size_t coldim,
 				      complex<FpType> *res,
 				      const complex<FpType> alpha,
@@ -511,7 +547,7 @@ private:
 						(CudaComplexPtr<FpType>)res, 1);
     }
 
-    template<typename FpType>
+    template<RealScalar FpType>
     static cublasStatus_t cublas_gemm(size_t rowdim, size_t coldimA, size_t coldimB,
 				      complex<FpType> *res,
 				      const complex<FpType> alpha,
@@ -534,7 +570,7 @@ private:
 						(int64_t)rowdim);
     }
 
-    template<typename FpType>
+    template<RealScalar FpType>
     static cusolverStatus_t cusolver_syevd_get_bufsize(cusolverDnParams_t params,
 						       cusolverEigMode_t jobz,
 						       cublasFillMode_t uplo,
@@ -550,7 +586,7 @@ private:
 					   &dworksz, &lworksz);
     }
 
-    template<typename FpType>
+    template<RealScalar FpType>
     static cusolverStatus_t cusolver_syevd(cusolverDnParams_t params,
 					   cusolverEigMode_t jobz,
 					   cublasFillMode_t uplo,
@@ -575,9 +611,54 @@ private:
 	gridsize = size / blocksize;
     }
 
+    // Compute v0 += v1. v0 and v1 are assumed to point to different buffers.
+    template<RealScalar FpType>
+    static void add_vec(size_t size, complex<FpType> *v0,
+			const complex<FpType> *v1);
+
+    // Compute res = v0 + v1. res is assumed to be different from both v0 and v1.
+    template<RealScalar FpType>
+    static void add_vec(size_t size, complex<FpType> *res,
+			const complex<FpType> *v0, const complex<FpType> *v1);
+
+    // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
+    template<RealScalar FpType>
+    static void add_vec(size_t size, complex<FpType> *v0,
+			complex<FpType> s, const complex<FpType> *v1) {
+	CUBLAS_CALL(cublas_axpy(size, s, v1, v0));
+    }
+
+    // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
+    template<RealScalar FpType>
+    static void add_vec(size_t size, complex<FpType> *v0,
+			FpType s, const complex<FpType> *v1) {
+	CUBLAS_CALL(cublas_axpy(size, {s,0}, v1, v0));
+    }
+
+    // Compute v *= s where s is a real scalar.
+    template<RealScalar FpType>
+    static void scale_vec(size_t size, complex<FpType> *v, FpType s) {
+	CUBLAS_CALL(cublas_scal(size, s, v));
+    }
+
+    // Compute v *= s where s is a complex scalar.
+    template<RealScalar FpType>
+    static void scale_vec(size_t size, complex<FpType> *v, complex<FpType> s) {
+	CUBLAS_CALL(cublas_scal(size, s, v));
+    }
+
+    // Compute the vector norm of the complex vector v. In other words, compute
+    // n = sqrt(<v|v>) = sqrt(v^\dagger \cdot v)
+    template<RealScalar FpType>
+    static FpType vec_norm(size_t size, complex<FpType> *v) {
+	FpType n = 0.0;
+	CUBLAS_CALL(cublas_nrm2(size, n, v));
+	return n;
+    }
+
     // Compute res[i] = exp(c*v[i]) where res is a complex dim-by-1 matrix
     // and v is a real dim dimensional vector.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void exp_vec(typename DevSumOps<FpType>::MatrixType &res,
 			const FpType *v, complex<FpType> c);
 
@@ -587,7 +668,7 @@ private:
     // M_res = M_v * diag(lambda). Here M_v is the matrix whose in-memory
     // representation matches that of v (ie. v[i] is the i-th column vector
     // of M_v), and likewise for M_res.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void scale_vecs(typename DevSumOps<FpType>::MatrixType &res,
 			   const typename DevSumOps<FpType>::MatrixType &v,
 			   const typename DevSumOps<FpType>::MatrixType &lambda,
@@ -597,17 +678,17 @@ private:
     // functions above can only be accessed by DevSumOps and DevSumOps::MatrixType.
 public:
     // Initialize the vector with zero, ie. set v0[i] to 0.0 for all i.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void zero_vec(VecSizeType<FpType> size, BufType<FpType> v) {
 	CUDA_CALL(cudaMemset(v.dev_ptr, 0, size * sizeof(complex<FpType>)));
     }
 
     // Initialize the vector to a Haar random state.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void init_random(VecSizeType<FpType> size, BufType<FpType> v);
 
     // Copy v1 into v0.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void copy_vec(VecSizeType<FpType> size, BufType<FpType> v0,
 			 ConstBufType<FpType> v1) {
 	CUDA_CALL(cudaMemcpy(v0.dev_ptr, v1.dev_ptr,
@@ -624,58 +705,74 @@ public:
 			 ConstBufType<float> v1);
 
     // Compute v0 += v1. v0 and v1 are assumed to point to different buffers.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
-			ConstBufType<FpType> v1);
+			ConstBufType<FpType> v1) {
+	add_vec(size, v0.dev_ptr, v1.dev_ptr);
+    }
 
     // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
-			complex<FpType> s, ConstBufType<FpType> v1);
+			complex<FpType> s, ConstBufType<FpType> v1) {
+	add_vec(size, v0.dev_ptr, s, v1.dev_ptr);
+    }
 
     // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> v0, FpType s,
-			ConstBufType<FpType> v1);
+			ConstBufType<FpType> v1) {
+	add_vec(size, v0.dev_ptr, s, v1.dev_ptr);
+    }
 
     // Compute res = v0 + v1. res is assumed to be different from both v0 and v1.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> res,
-			ConstBufType<FpType> v0, ConstBufType<FpType> v1);
+			ConstBufType<FpType> v0, ConstBufType<FpType> v1) {
+	add_vec(size, res.dev_ptr, v0.dev_ptr, v1.dev_ptr);
+    }
 
     // Compute v *= s where s is a real scalar.
-    template<typename FpType>
-    static void scale_vec(VecSizeType<FpType> size, BufType<FpType> v,
-			  FpType s);
+    template<RealScalar FpType>
+    static void scale_vec(VecSizeType<FpType> size, BufType<FpType> v, FpType s) {
+	scale_vec(size, v.dev_ptr, s);
+    }
 
     // Compute v *= s where s is a complex scalar.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void scale_vec(VecSizeType<FpType> size, BufType<FpType> v,
-			  complex<FpType> s);
+			  complex<FpType> s) {
+	scale_vec(size, v.dev_ptr, s);
+    }
 
-    // Compute the vector inner product of the complex vector v0 and v1. In other words,
-    // compute v = <v0 | v1> = v0^\dagger \cdot v1
-    template<typename FpType>
-    static complex<FpType> vec_prod(VecSizeType<FpType> size, ConstBufType<FpType> v0,
-				    ConstBufType<FpType> v1);
+    // Compute the vector inner product of the complex vector v0 and v1.
+    // In other words, compute v = <v0 | v1> = v0^\dagger \cdot v1
+    template<RealScalar FpType>
+    static complex<FpType> vec_prod(size_t size, ConstBufType<FpType> v0,
+				    ConstBufType<FpType> v1) {
+	complex<FpType> res = 0.0;
+	CUBLAS_CALL(cublas_dotc(size, res, v0.dev_ptr, v1.dev_ptr));
+	return res;
+    }
 
     // Compute the vector norm of the complex vector v. In other words, compute
     // n = sqrt(<v|v>) = sqrt(v^\dagger \cdot v)
-    template<typename FpType>
-    static FpType vec_norm(VecSizeType<FpType> size, ConstBufType<FpType> v);
+    template<RealScalar FpType>
+    static FpType vec_norm(size_t size, ConstBufType<FpType> v) {
+	return vec_norm(size, v.dev_ptr);
+    }
 
     // Set the given matrix to the identity matrix.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void eye(typename DevSumOps<FpType>::MatrixType &res);
 
     // Compute the matrix multiplication res = mat * vec, where mat is of
     // type HostSumOps::MatrixType. Here res and vec are assumed to be
     // different buffers.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void mat_mul(VecSizeType<FpType> dim, BufType<FpType> res,
 			const typename DevSumOps<FpType>::MatrixType &mat,
-			ConstBufType<FpType> vec,
-			bool adjoint = false) {
+			ConstBufType<FpType> vec, bool adjoint = false) {
 	assert(dim == mat.rowdim);
 	assert(dim == mat.coldim);
 	CUBLAS_CALL(cublas_gemv(dim, dim, res.dev_ptr, {1,0}, mat.dev_ptr,
@@ -685,7 +782,7 @@ public:
     // Compute the matrix multiplication res = mat0 * mat1, where mat0 and
     // mat1 are of type HostSumOps::MatrixType. Here the res pointer is
     // assumed to be different from mat0 and mat1.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void mat_mul(typename DevSumOps<FpType>::MatrixType &res,
 			const typename DevSumOps<FpType>::MatrixType &mat0,
 			const typename DevSumOps<FpType>::MatrixType &mat1,
@@ -699,17 +796,17 @@ public:
     }
 
     // Compute the trace of the given matrix.
-    template<typename FpType>
+    template<RealScalar FpType>
     static complex<FpType> mat_tr(const typename DevSumOps<FpType>::MatrixType &mat);
 
     // Compute res = ops * vec. res and vec are assumed to be different.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void apply_ops(typename SpinOp<FpType>::IndexType len, BufType<FpType> res,
 			  const DevSumOps<FpType> &ops, ConstBufType<FpType> vec);
 };
 
 // Initialize the vector to a Haar random state.
-template<typename FpType>
+template<RealScalar FpType>
 inline void GPUImpl::init_random(VecSizeType<FpType> size, BufType<FpType> v) {
     // Generate 2*size random numbers
     CURAND_CALL(gen_norm((FpType *)v.dev_ptr, 2*size));
@@ -718,54 +815,7 @@ inline void GPUImpl::init_random(VecSizeType<FpType> size, BufType<FpType> v) {
     scale_vec(size, v, c);
 }
 
-// Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
-template<typename FpType>
-inline void GPUImpl::add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
-			     complex<FpType> s, ConstBufType<FpType> v1) {
-    CUBLAS_CALL(cublas_axpy(size, s, v1.dev_ptr, v0.dev_ptr));
-}
-
-// Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
-template<typename FpType>
-inline void GPUImpl::add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
-			     FpType s, ConstBufType<FpType> v1) {
-    CUBLAS_CALL(cublas_axpy(size, complex<FpType>(s), v1.dev_ptr, v0.dev_ptr));
-}
-
-// Compute v *= s where s is a real scalar.
-template<typename FpType>
-inline void GPUImpl::scale_vec(VecSizeType<FpType> size, BufType<FpType> v, FpType s) {
-    CUBLAS_CALL(cublas_scal(size, s, v.dev_ptr));
-}
-
-// Compute v *= s where s is a complex scalar.
-template<typename FpType>
-inline void GPUImpl::scale_vec(VecSizeType<FpType> size, BufType<FpType> v,
-			       complex<FpType> s) {
-    CUBLAS_CALL(cublas_scal(size, s, v.dev_ptr));
-}
-
-// Compute the vector inner product of the complex vector v0 and v1. In other words,
-// compute v = <v0 | v1> = v0^\dagger \cdot v1
-template<typename FpType>
-inline complex<FpType> GPUImpl::vec_prod(VecSizeType<FpType> size,
-					 ConstBufType<FpType> v0,
-					 ConstBufType<FpType> v1) {
-    complex<FpType> res = 0.0;
-    CUBLAS_CALL(cublas_dotc(size, res, v0.dev_ptr, v1.dev_ptr));
-    return res;
-}
-
-// Compute the vector norm of the complex vector v. In other words, compute
-// n = sqrt(<v|v>) = sqrt(v^\dagger \cdot v)
-template<typename FpType>
-inline FpType GPUImpl::vec_norm(VecSizeType<FpType> size, ConstBufType<FpType> v) {
-    FpType n = 0.0;
-    CUBLAS_CALL(cublas_nrm2(size, n, v.dev_ptr));
-    return n;
-}
-
-template<typename FpType>
+template<RealScalar FpType>
 inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::Identity(
     ssize_t rowdim, ssize_t coldim) {
     MatrixType id(rowdim, coldim);
@@ -773,19 +823,49 @@ inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::Identity(
     return id;
 }
 
-template<typename FpType>
+template<RealScalar FpType>
+inline DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator+=(
+    const DevSumOps<FpType>::MatrixType &other) {
+    if (rowdim != other.rowdim || coldim != other.coldim) {
+	ThrowException(InvalidArgument, "matrix dimensions", "must match");
+    }
+    GPUImpl::add_vec<FpType>(rowdim * coldim, dev_ptr, other.dev_ptr);
+    return *this;
+}
+
+template<RealScalar FpType>
+inline DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator-=(
+    const DevSumOps<FpType>::MatrixType &other) {
+    if (rowdim != other.rowdim || coldim != other.coldim) {
+	ThrowException(InvalidArgument, "matrix dimensions", "must match");
+    }
+    GPUImpl::add_vec<FpType>(rowdim * coldim, dev_ptr, {-1,0}, other.dev_ptr);
+    return *this;
+}
+
+template<RealScalar FpType>
 inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::operator*(
     const DevSumOps<FpType>::MatrixType &other) const {
     if (coldim != other.rowdim) {
+	std::stringstream ss;
+	ss << "must match the row dimension of the second matrix ("
+	   << coldim << " != " << other.rowdim << ")";
 	ThrowException(InvalidArgument, "column dimension of first matrix",
-		       "must match the row dimension of the second matrix");
+		       ss.str().c_str());
     }
     MatrixType res(rowdim, other.coldim);
     GPUImpl::mat_mul<FpType>(res, *this, other);
     return res;
 }
 
-template<typename FpType>
+template<RealScalar FpType>
+inline DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator*=(
+    complex<FpType> c) {
+    GPUImpl::scale_vec<FpType>(rowdim * coldim, dev_ptr, c);
+    return *this;
+}
+
+template<RealScalar FpType>
 inline complex<FpType> DevSumOps<FpType>::MatrixType::trace() const {
     if (coldim != rowdim) {
 	ThrowException(InvalidArgument, "column dimension of matrix",
@@ -794,7 +874,12 @@ inline complex<FpType> DevSumOps<FpType>::MatrixType::trace() const {
     return GPUImpl::mat_tr<FpType>(*this);
 }
 
-template<typename FpType>
+template<RealScalar FpType>
+inline FpType DevSumOps<FpType>::MatrixType::mat_norm() const {
+    return GPUImpl::vec_norm(rowdim * coldim, dev_ptr);
+}
+
+template<RealScalar FpType>
 inline DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensystem(int len) const {
     size_t dim = 1ULL << len;
     if (!dev_eigenvals || eigenvecs->rowdim != dim) {
@@ -859,7 +944,7 @@ inline DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensystem(int len
     return {host_eigenvals, *eigenvecs};
 }
 
-template<typename FpType>
+template<RealScalar FpType>
 inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::matexp(complex<FpType> c,
 							       int len) const {
     get_eigensystem(len);

@@ -9,7 +9,7 @@ Module Name:
 Abstract:
 
     This header file contains definitions for data structures pertaining
-    to fermionic field operators without splitting them into parity blocks.
+    to fermionic field operators.
 
 Revision History:
 
@@ -21,11 +21,6 @@ Revision History:
 
 #ifndef _REAPERS_H_
 #error "Do not include this file directly. Include the master header file reapers.h"
-#include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
-#endif
-
-#ifdef REAPERS_USE_PARITY_BLOCKS
-#error "You must not define REAPERS_USE_PARITY_BLOCKS before including this file."
 #include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
 #endif
 
@@ -76,9 +71,10 @@ Revision History:
 //
 // Here {sy or sz} is sy when n is odd and sz when n is even. and is simply not
 // present when n=0.
-template<typename FpType>
-class FermionOp : public SpinOp<FpType> {
+template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
+class FermionNonBlockOp : public Impl::template SumOps<FpType> {
     using IndexType = u8;
+    IndexType N, n;
 
     static void check_field_index(IndexType N, IndexType n) {
 	if (N < 2) {
@@ -93,9 +89,14 @@ class FermionOp : public SpinOp<FpType> {
     }
 
 public:
+    // Product of two fermion operators is another spin operator (a SumOps
+    // with one term). We can probably have the compiler deduce this using
+    // some decltype magic, but let's not do that.
+    using ProductType = typename Impl::template SumOps<FpType>;
+
     // Construct the n-th Fermion field operator using the formula discussed above
-    FermionOp(IndexType N, IndexType n, bool standard_gamma = true)
-	: SpinOp<FpType>(SpinOp<FpType>::identity()) {
+    FermionNonBlockOp(IndexType N, IndexType n, bool standard_gamma = true)
+	: Impl::template SumOps<FpType>(SpinOp<FpType>::identity()), N(N), n(n) {
 	check_field_index(N, n);
 	for (int i = (n+1)/2; i < N/2; i++) {
 	    *this *= SpinOp<FpType>::sigma_x(i);
@@ -112,7 +113,113 @@ public:
 	    *this /= sqrt(2.0);
 	}
     }
+
+    using Impl::template SumOps<FpType>::operator+;
+    using Impl::template SumOps<FpType>::operator-;
+    using Impl::template SumOps<FpType>::operator*;
+    using Impl::template SumOps<FpType>::operator+=;
+    using Impl::template SumOps<FpType>::operator-=;
+    using Impl::template SumOps<FpType>::operator*=;
+    using Impl::template SumOps<FpType>::operator/=;
+    using Impl::template SumOps<FpType>::operator==;
+
+    int spin_chain_length() const { return N/2; }
+
+    using MatrixType = typename Impl::template SumOps<FpType>::MatrixType;
+    operator MatrixType() const {
+	return this->get_matrix(spin_chain_length());
+    }
+
+    // Impl::SumOps doesn't define operator* with MatrixType (because
+    // it doesn't store the spin chain length) so we must define it here
+    MatrixType operator*(const MatrixType &psi) const {
+	return static_cast<MatrixType>(*this) * psi;
+    }
 };
 
-template<typename FpType = DefFpType>
-using HamOp = SumOps<FpType>;
+// This class represents the n-th Majorana fermion field operator b_n in
+// terms of parity blocks.
+//
+// Observe that since
+//
+// sx = ( 0  1 )    and   sy = ( 0  -i )
+//      ( 1  0 )               ( i   0 )
+//
+// all b_i can be written in the block off-diagonal form
+//
+// b_i = (   0     bLR_i )
+//       ( bRL_i     0   )
+//
+// where for 0 <= i <= N-3, the bLR_i and bRL_i matrices are identical to each
+// other and are exactly the b_i matrix from the previous (N-2) iteration. For
+// i == N-2, bLR and bRL are also identical to each other and are simply the
+// single site operator sz(N/2-2) (divided by sqrt2 if standard_gamma is true),
+// and for i == N-1, bLR is simply -i times the identity matrix (divided by
+// sqrt2 if needed), and bRL is simply i times the identity matrix (div. sqrt2).
+template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
+class FermionBlockOp : public BlockAntiDiag<typename Impl::template SumOps<FpType>> {
+    using IndexType = u8;
+    IndexType N, n;
+
+    static void check_field_index(IndexType N, IndexType n) {
+	if (N < 2) {
+	    ThrowException(InvalidArgument, "N", "must be at least two");
+	}
+	if (N & 1) {
+	    ThrowException(InvalidArgument, "N", "must be even");
+	}
+	if (n > N) {
+	    ThrowException(FieldIndexTooLarge, n, N);
+	}
+    }
+
+public:
+    // Product of two fermion operators is block diagonal.
+    using ProductType = BlockDiag<typename Impl::template SumOps<FpType>>;
+
+    // Construct the n-th Fermion field operator using the formula discussed above
+    FermionBlockOp(IndexType N, IndexType n, bool standard_gamma = true) :
+	BlockAntiDiag<typename Impl::template SumOps<FpType>>(
+	    SpinOp<FpType>::identity(), SpinOp<FpType>::identity()), N(N), n(n) {
+	check_field_index(N, n);
+	if (n == (N-1)) {
+	    this->LR *= complex<FpType>{0, -1};
+	    this->RL *= complex<FpType>{0, 1};
+	} else {
+	    for (int i = (n+1)/2; i < N/2-1; i++) {
+		this->LR *= SpinOp<FpType>::sigma_x(i);
+	    }
+	    if (n != 0) {
+		this->LR *= (n & 1) ? SpinOp<FpType>::sigma_y((n-1)/2)
+		    : SpinOp<FpType>::sigma_z((n-1)/2);
+	    }
+	    this->RL = this->LR;
+	}
+	if (standard_gamma) {
+	    *this /= sqrt(2.0);
+	}
+    }
+
+    int spin_chain_length() const { return N/2-1; }
+
+    using MatrixType = typename Impl::template SumOps<FpType>::MatrixType;
+    operator BlockAntiDiag<MatrixType>() const {
+	return this->get_matrix(spin_chain_length());
+    }
+
+    // Impl::SumOps doesn't define operator* with MatrixType (because
+    // it doesn't store the spin chain length) so we must define it here
+    template<template<typename> typename B>
+    requires BlockForm<B<MatrixType>>
+    auto operator*(const B<MatrixType> &psi) const {
+	return static_cast<BlockAntiDiag<MatrixType>>(*this) * psi;
+    }
+};
+
+#ifdef REAPERS_USE_PARITY_BLOCKS
+template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
+using FermionOp = FermionBlockOp<FpType, Impl>;
+#else
+template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
+using FermionOp = FermionNonBlockOp<FpType, Impl>;
+#endif

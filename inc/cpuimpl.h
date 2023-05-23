@@ -28,13 +28,12 @@ Revision History:
 //   O = \sum_i O_i
 //
 // where each O_i is a spin operator.
-template<typename FpType = DefFpType>
+template<RealScalar FpType = DefFpType>
 class HostSumOps {
-    template<typename FpType1>
+    template<RealScalar FpType1>
     friend class HostSumOps;
 
 public:
-    using ComplexScalar = typename SpinOp<FpType>::ComplexScalar;
     using MatrixType = Eigen::Matrix<std::complex<FpType>,
 				     Eigen::Dynamic, Eigen::Dynamic>;
     using EigenVals = Eigen::Matrix<FpType, Eigen::Dynamic, 1>;
@@ -66,17 +65,21 @@ public:
 
     // Conversion between sum operators of different floating point precision
     // must be explicit.
-    template<typename FpType1>
+    template<RealScalar FpType1>
     explicit HostSumOps(const HostSumOps<FpType1> &op) {
 	for (auto o : op) {
-	    ops.emplace_back(o);
+	    if (o != 0.0) {
+		ops.emplace_back(o);
+	    }
 	}
     }
 
     // We can initialize a HostSumOps with a list of SpinOp objects
     HostSumOps(const std::initializer_list<SpinOp<FpType>> &l = {}) {
 	for (auto &&o : l) {
-	    *this += o;
+	    if (o != 0.0) {
+		*this += o;
+	    }
 	}
     }
 
@@ -87,8 +90,26 @@ public:
 
     // Assignment operator. We must release the internal mutable state.
     HostSumOps &operator=(const HostSumOps &rhs) {
+	// Guard against self assignment
+	if (this == &rhs) {
+	    return *this;
+	}
 	release();
 	ops = rhs.ops;
+	return *this;
+    }
+
+    // Assignment operator. We must release the internal mutable state.
+    // Note here we must convert the floating point type.
+    template<RealScalar FpType1>
+    HostSumOps &operator=(const HostSumOps<FpType1> &rhs) {
+	release();
+	ops.clear();
+	for (auto op : rhs) {
+	    if (op != 0.0) {
+		ops.emplace_back(SpinOp<FpType>(op));
+	    }
+	}
 	return *this;
     }
 
@@ -96,8 +117,24 @@ public:
     HostSumOps &operator=(const SpinOp<FpType> &rhs) {
 	release();
 	ops.clear();
-	ops.emplace_back(rhs);
+	if (rhs != 0.0) {
+	    ops.emplace_back(rhs);
+	}
 	return *this;
+    }
+
+    bool operator==(const HostSumOps &rhs) const {
+	HostSumOps res{*this - rhs};
+	return res.ops.empty();
+    }
+
+    template<ScalarType S>
+    bool operator==(S s) const {
+	if (s == S{}) {
+	    return ops.empty();
+	} else {
+	    return (ops.size() == 1) && (ops[0] == s);
+	}
     }
 
     // We don't allow the user to modify the operators using iterators.
@@ -110,14 +147,30 @@ public:
     // operator to the list of operators.
     HostSumOps &operator+=(const SpinOp<FpType> &op) {
 	release();
-	for (auto &o : ops) {
-	    if (o.bits == op.bits) {
-		o.coeff += op.coeff;
+	if (op == 0) {
+	    return *this;
+	}
+	// If we already have a spin operator with the same base (ie. the bits
+	// member of SpinOp) in our sum, just add up the coefficients.
+	for (auto it = ops.begin(); it != ops.end(); it++) {
+	    if (it->bits == op.bits) {
+		it->coeff += op.coeff;
+		// If the coefficient is now zero, we remove the operator.
+		if (it->coeff == 0.0) {
+		    ops.erase(it);
+		}
 		return *this;
 	    }
 	}
+	// Otherwise, add the operator to the end of the list.
 	ops.push_back(op);
 	return *this;
+    }
+
+    HostSumOps &operator-=(SpinOp<FpType> op) {
+	release();
+	op *= -1;
+	return *this += op;
     }
 
     // Add another HostSumOps to this one
@@ -129,11 +182,35 @@ public:
 	return *this;
     }
 
+    HostSumOps &operator-=(HostSumOps rhs) {
+	release();
+	rhs *= -1;
+	return *this += rhs;
+    }
+
     // Add the supplied operator and this operator together, without changing this
     // operator, and return the result.
     HostSumOps operator+(const SpinOp<FpType> &op) const {
 	HostSumOps res(*this);
 	res += op;
+	return res;
+    }
+
+    HostSumOps operator+(const HostSumOps &op) const {
+	HostSumOps res(*this);
+	res += op;
+	return res;
+    }
+
+    HostSumOps operator-(const SpinOp<FpType> &op) const {
+	HostSumOps res(*this);
+	res -= op;
+	return res;
+    }
+
+    HostSumOps operator-(const HostSumOps &op) const {
+	HostSumOps res(*this);
+	res -= op;
 	return res;
     }
 
@@ -145,16 +222,16 @@ public:
     }
 
     // Scalar multiplication
-    HostSumOps &operator*=(const ComplexScalar &rhs) {
+    HostSumOps &operator*=(const complex<FpType> &rhs) {
 	release();
 	*this = operator*(rhs);
 	return *this;
     }
 
     // Scalar "division", defined as scalar multiplication by 1/s
-    HostSumOps &operator/=(const ComplexScalar &s) {
+    HostSumOps &operator/=(const complex<FpType> &s) {
 	release();
-	*this = operator*(ComplexScalar{1.0,0.0}/s);
+	*this = operator*(complex<FpType>{1.0,0.0}/s);
 	return *this;
     }
 
@@ -172,7 +249,7 @@ public:
 
     // Multiply the specified complex scalar with this operator (without
     // changing this operator), and return the result.
-    HostSumOps operator*(ComplexScalar rhs) const {
+    HostSumOps operator*(complex<FpType> rhs) const {
 	HostSumOps res;
 	for (auto &&op0 : *this) {
 	    res += rhs * op0;
@@ -181,7 +258,7 @@ public:
     }
 
     // Scalar multiplication can be done from both directions.
-    friend HostSumOps operator*(ComplexScalar s, const HostSumOps &ops) {
+    friend HostSumOps operator*(complex<FpType> s, const HostSumOps &ops) {
 	return ops * s;
     }
 
@@ -245,7 +322,7 @@ public:
     // should NOT call this function if you want to compute state evolution
     // (especially if you want to use Krylov). Call State::evolve() instead.
     // Here len is the length of the spin chain.
-    MatrixType matexp(ComplexScalar c, int len) const {
+    MatrixType matexp(complex<FpType> c, int len) const {
 	EigenSystem eigensys = get_eigensystem(len);
 	const EigenVals &eigenvals = std::get<0>(eigensys);
 	assert(eigenvals.rows() == (1LL << len));
@@ -295,36 +372,26 @@ public:
     }
 };
 
-
-// Add two spin operators together.
-template<typename FpType>
-inline HostSumOps<FpType> operator+(SpinOp<FpType> op0, const SpinOp<FpType> &op1) {
-    HostSumOps res{op0};
-    res += op1;
-    return res;
-}
-
 // Class that implements basic vector operations on the CPU. This is for testing
 // purpose only and is not suitable for realistic calculations.
 // Note: we cannot make this a template because this class has static members
 // that can only be initialized once. In terms of design patterns this is a
 // so-called 'singleton' class.
 class CPUImpl {
-    template<typename FpType>
+    template<RealScalar FpType>
     class HostVec {
-	using ComplexScalar = complex<FpType>;
 	size_t dim;
-	std::unique_ptr<ComplexScalar[]> vec;
+	std::unique_ptr<complex<FpType>[]> vec;
 	// We don't allow copy assignment or copy construction of vectors.
 	// Move construction and move assignment are allowed.
 	HostVec(const HostVec &) = delete;
 	HostVec &operator=(const HostVec &) = delete;
     public:
-	HostVec(size_t dim) : dim(dim), vec(std::make_unique<ComplexScalar[]>(dim)) {}
+	HostVec(size_t dim) : dim(dim), vec(std::make_unique<complex<FpType>[]>(dim)) {}
 	HostVec(HostVec &&) = default;
 	HostVec &operator=(HostVec &&) = default;
-	ComplexScalar *get() { return vec.get(); }
-	ComplexScalar *get() const { return vec.get(); }
+	complex<FpType> *get() { return vec.get(); }
+	complex<FpType> *get() const { return vec.get(); }
 	friend void swap(HostVec &lhs, HostVec &rhs) {
 	    HostVec v0(std::move(lhs));
 	    lhs = std::move(rhs);
@@ -343,41 +410,38 @@ class CPUImpl {
     inline static Context ctx;
 
 public:
-    template<typename FpType>
+    template<RealScalar FpType>
     using VecType = HostVec<FpType>;
 
-    template<typename FpType>
+    template<RealScalar FpType>
     using VecSizeType = typename SpinOp<FpType>::StateType;
 
-    template<typename FpType>
-    using ComplexScalar = complex<FpType>;
+    template<RealScalar FpType>
+    using BufType = complex<FpType> *;
 
-    template<typename FpType>
-    using BufType = ComplexScalar<FpType> *;
+    template<RealScalar FpType>
+    using ConstBufType = const complex<FpType> *;
 
-    template<typename FpType>
-    using ConstBufType = const ComplexScalar<FpType> *;
+    template<RealScalar FpType>
+    using ElemRefType = complex<FpType> &;
 
-    template<typename FpType>
-    using ElemRefType = ComplexScalar<FpType> &;
-
-    template<typename FpType>
+    template<RealScalar FpType>
     using SumOps = HostSumOps<FpType>;
 
     // Initialize the vector to a Haar random state.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void init_random(VecSizeType<FpType> size, BufType<FpType> v0) {
 	std::normal_distribution<FpType> norm(0.0, 1.0);
 	#pragma omp parallel for
 	for (VecSizeType<FpType> i = 0; i < size; i++) {
-	    v0[i] = ComplexScalar<FpType>{norm(ctx.randgen), norm(ctx.randgen)};
+	    v0[i] = complex<FpType>{norm(ctx.randgen), norm(ctx.randgen)};
 	}
 	FpType s = 1.0/vec_norm(size, v0);
 	scale_vec(size, v0, s);
     }
 
     // Initialize the vector with zero, ie. set v0[i] to 0.0 for all i.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void zero_vec(VecSizeType<FpType> size, BufType<FpType> v0) {
 	#pragma omp parallel for
 	for (VecSizeType<FpType> i = 0; i < size; i++) {
@@ -386,7 +450,7 @@ public:
     }
 
     // Copy v1 into v0, possibly with a different floating point precision.
-    template<typename FpType0, typename FpType1>
+    template<RealScalar FpType0, RealScalar FpType1>
     static void copy_vec(VecSizeType<FpType0> size, BufType<FpType0> v0,
 			 ConstBufType<FpType1> v1) {
 	#pragma omp parallel for
@@ -396,7 +460,7 @@ public:
     }
 
     // Compute v0 += v1. v0 and v1 are assumed to point to different buffers.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
 			ConstBufType<FpType> v1) {
 	#pragma omp parallel for
@@ -406,7 +470,7 @@ public:
     }
 
     // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
 			FpType s, ConstBufType<FpType> v1) {
 	#pragma omp parallel for
@@ -416,9 +480,9 @@ public:
     }
 
     // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
-			ComplexScalar<FpType> s, ConstBufType<FpType> v1) {
+			complex<FpType> s, ConstBufType<FpType> v1) {
 	#pragma omp parallel for
 	for (VecSizeType<FpType> i = 0; i < size; i++) {
 	    v0[i] += s * v1[i];
@@ -426,7 +490,7 @@ public:
     }
 
     // Compute res = v0 + v1. res is assumed to be different from both v0 and v1.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> res,
 			ConstBufType<FpType> v0, ConstBufType<FpType> v1) {
 	#pragma omp parallel for
@@ -436,7 +500,7 @@ public:
     }
 
     // Compute v0 *= s where s is a real scalar.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void scale_vec(VecSizeType<FpType> size, BufType<FpType> v0, FpType s) {
 	#pragma omp parallel for
 	for (VecSizeType<FpType> i = 0; i < size; i++) {
@@ -445,9 +509,9 @@ public:
     }
 
     // Compute v0 *= s where s is a complex scalar.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void scale_vec(VecSizeType<FpType> size, BufType<FpType> v0,
-			  ComplexScalar<FpType> s) {
+			  complex<FpType> s) {
 	#pragma omp parallel for
 	for (VecSizeType<FpType> i = 0; i < size; i++) {
 	    v0[i] *= s;
@@ -456,24 +520,24 @@ public:
 
     // Compute the vector inner product of the complex vector v0 and v1. In other words,
     // compute v = <v0 | v1> = v0^\dagger \cdot v1
-    template<typename FpType>
-    static ComplexScalar<FpType> vec_prod(VecSizeType<FpType> size,
-					  ConstBufType<FpType> v0,
-					  ConstBufType<FpType> v1) {
+    template<RealScalar FpType>
+    static complex<FpType> vec_prod(VecSizeType<FpType> size,
+				    ConstBufType<FpType> v0,
+				    ConstBufType<FpType> v1) {
 	FpType real = 0.0;
 	FpType imag = 0.0;
 	#pragma omp parallel for reduction (+:real,imag)
 	for (VecSizeType<FpType> i = 0; i < size; i++) {
-	    ComplexScalar<FpType> res = conj(v0[i]) * v1[i];
+	    complex<FpType> res = conj(v0[i]) * v1[i];
 	    real += res.real();
 	    imag += res.imag();
 	}
-	return ComplexScalar<FpType>{real, imag};
+	return complex<FpType>{real, imag};
     }
 
     // Compute the vector norm of the complex vector v0. In other words, compute
     // v = sqrt(<v0 | v0>) = sqrt(v0^\dagger \cdot v0)
-    template<typename FpType>
+    template<RealScalar FpType>
     static FpType vec_norm(VecSizeType<FpType> size, ConstBufType<FpType> v0) {
 	return std::sqrt(vec_prod(size, v0, v0).real());
     }
@@ -481,7 +545,7 @@ public:
     // Compute the matrix multiplication res = mat * vec, where mat is of
     // type HostSumOps::MatrixType. Here res and vec are assumed to be
     // different buffers.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void mat_mul(VecSizeType<FpType> dim, BufType<FpType> res,
 			const typename HostSumOps<FpType>::MatrixType &mat,
 			ConstBufType<FpType> vec) {
@@ -492,7 +556,7 @@ public:
     }
 
     // Compute res += ops * vec. res and vec are assumed to be different.
-    template<typename FpType>
+    template<RealScalar FpType>
     static void apply_ops(typename SpinOp<FpType>::IndexType len, BufType<FpType> res,
 			  const HostSumOps<FpType> &ops, ConstBufType<FpType> vec) {
 	assert(len <= 64);
