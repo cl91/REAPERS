@@ -42,7 +42,6 @@ using HamOp = typename SYK<FpType>::HamOp;
 class Eval : protected ArgParser {
     bool gndst;
     bool use_krylov;
-    int matpow;
     int m;
     float dt;
     float mu;
@@ -59,11 +58,6 @@ class Eval : protected ArgParser {
 	    ("mu", progopts::value<float>(&mu)->required(), "Specify mu.")
 	    ("t0", progopts::value<float>(&t0)->default_value(0.0),
 	     "Specify the starting time point.")
-	    ("matrix-power", progopts::value<int>(&matpow)->default_value(0),
-	     "Use matrix power expansion when computing exp(-iHt) instead of"
-	     " exact diagonalization and specify the order to which the matrix"
-	     " exponential is expanded. This option cannot be specified if"
-	     " --use-krylov is specified.")
 	    ("use-krylov",
 	     progopts::bool_switch(&use_krylov)->default_value(false),
 	     "Use the Krylov algorithm to compute state evolution instead of exact"
@@ -84,9 +78,6 @@ class Eval : protected ArgParser {
     void evolve(BlockState<FpType> &psi, const HamOp<FpType> &ham, float t) {
 	if (use_krylov) {
 	    psi.template evolve<EvolutionAlgorithm::Krylov>(ham, t, 0.0, krylov_dim);
-	} else if (matpow) {
-	    psi.template evolve<EvolutionAlgorithm::MatrixPower>(ham, t, 0.0, matpow);
-	    psi.normalize();
 	} else {
 	    psi.template evolve<EvolutionAlgorithm::ExactDiagonalization>(ham, t, 0.0);
 	}
@@ -257,8 +248,6 @@ class Eval : protected ArgParser {
 	if (!trace) {
 	    if (use_krylov) {
 		ss << "krydim" << krylov_dim;
-	    } else if (matpow) {
-		ss << "matpow" << matpow;
 	    } else {
 		ss << "ed";
 	    }

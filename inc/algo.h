@@ -24,40 +24,6 @@ Revision History:
 #include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
 #endif
 
-// Compute the state evolution by expanding the matrix exponential to n-th power
-template<typename Impl>
-class MatrixPower {
-    template<RealScalar FpType>
-    using SumOps = typename Impl::template SumOps<FpType>;
-public:
-    // Compute s = exp(-(beta+it)H) * s by expanding to the n-th power.
-    template<RealScalar FpType>
-    static void evolve(State<FpType, Impl> &s, const SumOps<FpType> &ops,
-		       FpType t, FpType beta = 0.0, int n = 1) {
-	auto dim = s.dim();
-	auto len = s.spin_chain_length();
-	auto norm = s.norm();
-	s *= 1/norm;
-	// For CPUImpl, swap() will resolve to std::swap<std::unique_ptr>.
-	using std::swap;
-	// We need two internal buffers for H^k v
-	s.enlarge(3);
-	typename Impl::template BufType<FpType> orig = s.buf();
-	typename Impl::template BufType<FpType> v1 = s.buf(1); // H^i v
-	typename Impl::template BufType<FpType> v2 = s.buf(2); // H^{i+1} v
-	complex<FpType> c = 1.0;
-	Impl::copy_vec(dim, v1, orig);
-	for (int i = 0; i < n; i++) {
-	    Impl::zero_vec(dim, v2);
-	    Impl::apply_ops(len, v2, ops, v1);
-	    c *= complex<FpType>{-beta/(i+1), -t/(i+1)};
-	    Impl::add_vec(dim, orig, c, v2);
-	    swap(v1, v2);
-	}
-	s *= norm;
-    }
-};
-
 // Compute the state evolution using exact diagonalization.
 template<typename Impl>
 class ExactDiagonalization {
