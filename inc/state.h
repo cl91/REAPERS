@@ -419,8 +419,13 @@ struct BlockState : BlockVec<State<FpType,Impl>> {
 			int krydim = 3, FpType eps = 100*epsilon<FpType>()) {
 	auto g0 = this->L.ground_state(ham.LL, krydim, eps);
 	auto g1 = this->R.ground_state(ham.RR, krydim, eps);
-	normalize();
-	return g0 + g1;
+	if (g0 <= g1) {
+	  this->R.zero_state();
+	  return g0;
+	} else {
+	  this->L.zero_state();
+	  return g1;
+	}
     }
 
     // The compiler doesn't seem to generate this automatically so
