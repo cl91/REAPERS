@@ -375,7 +375,7 @@ public:
 	assert(curbuf >= 0);
 	assert(curbuf < num_bufs());
 	if (curbuf != 0) {
-	    swap_bufs(0, curbuf);
+	    swap_bufs(0, -curbuf);
 	}
 	// We cannot call resize() because our Impl::VecType is not
 	// copy construtable.
