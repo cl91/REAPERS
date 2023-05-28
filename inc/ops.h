@@ -199,7 +199,7 @@ private:
 
     static void check_spin_index(IndexType n) {
 	if (n > MAX_SPIN_INDEX) {
-	    DbgThrow(SpinIndexTooLarge, n, MAX_SPIN_INDEX);
+	    ThrowException(SpinIndexTooLarge, n, MAX_SPIN_INDEX);
 	}
     }
 

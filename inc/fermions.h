@@ -78,13 +78,13 @@ class FermionNonBlockOp : public Impl::template SumOps<FpType> {
 
     static void check_field_index(IndexType N, IndexType n) {
 	if (N < 2) {
-	    DbgThrow(InvalidArgument, "N", "must be at least two");
+	    ThrowException(InvalidArgument, "N", "must be at least two");
 	}
 	if (N & 1) {
-	    DbgThrow(InvalidArgument, "N", "must be even");
+	    ThrowException(InvalidArgument, "N", "must be even");
 	}
 	if (n > N) {
-	    DbgThrow(FieldIndexTooLarge, n, N);
+	    ThrowException(FieldIndexTooLarge, n, N);
 	}
     }
 
@@ -133,7 +133,7 @@ public:
     // Impl::SumOps doesn't define operator* with MatrixType (because
     // it doesn't store the spin chain length) so we must define it here
     MatrixType operator*(const MatrixType &psi) const {
-	return static_cast<MatrixType>(*this) * psi;
+	return this->operator MatrixType() * psi;
     }
 };
 
@@ -212,7 +212,7 @@ public:
     template<template<typename> typename B>
     requires BlockForm<B<MatrixType>>
     auto operator*(const B<MatrixType> &psi) const {
-	return static_cast<BlockAntiDiag<MatrixType>>(*this) * psi;
+	return this->operator BlockAntiDiag<MatrixType>() * psi;
     }
 };
 

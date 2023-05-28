@@ -27,12 +27,6 @@ Revision History:
 #define ThrowException(Ex, ...)						\
     throw REAPERS::Ex(__FILE__, __LINE__, __func__, __VA_ARGS__)
 
-#ifdef REAPERS_DEBUG
-#define DbgThrow(...)	ThrowException(__VA_ARGS__)
-#else
-#define DbgThrow(...)
-#endif
-
 // Base exception class that records the file name, line number, and function name
 // where the exception has happened.
 class Exception : public std::exception {
@@ -112,6 +106,11 @@ public:
 	ss << "Invalid argument for " << name << ": "
 	   << name << " " << param_msg << ".";
 	msg += ss.str();
+    }
+
+    InvalidArgument(const char *f, int l, const char *fn,
+		    const char *err_msg) : Exception(f, l, fn) {
+	msg += std::string("Invalid argument: ") + err_msg;
     }
 };
 

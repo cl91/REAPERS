@@ -201,6 +201,12 @@ public:
 	    *this = m;
 	}
 
+	MatrixType(MatrixType &&m) : rowdim{m.rowdim}, coldim{m.coldim},
+				     dev_ptr{m.dev_ptr} {
+	    m.rowdim = m.coldim = 0;
+	    m.dev_ptr = nullptr;
+	}
+
 	~MatrixType() { release(); }
 
 	static MatrixType Identity(ssize_t rowdim, ssize_t coldim);
@@ -215,11 +221,20 @@ public:
 	}
 
 	MatrixType &operator=(const MatrixType &rhs) {
+	    if (this == &rhs) { return *this; }
 	    resize(rhs.rowdim, rhs.coldim);
 	    if (datasize()) {
 		CUDA_CALL(cudaMemcpy(dev_ptr, rhs.dev_ptr,
 				     datasize(), cudaMemcpyDeviceToDevice));
 	    }
+	    return *this;
+	}
+
+	MatrixType &operator=(MatrixType &&rhs) {
+	    if (this == &rhs) { return *this; }
+	    std::swap(rowdim, rhs.rowdim);
+	    std::swap(coldim, rhs.coldim);
+	    std::swap(dev_ptr, rhs.dev_ptr);
 	    return *this;
 	}
 
@@ -280,7 +295,6 @@ public:
     using EigenVecs = MatrixType;
 
 private:
-
     mutable SpinOp<FpType> *dev_ops;
     mutable std::unique_ptr<MatrixType> dev_mat;
     mutable EigenVals host_eigenvals;
@@ -338,11 +352,26 @@ private:
 	matexp_cache.clear();
     }
 
+    void swap_internals(DevSumOps &&rhs) {
+	using std::swap;
+	swap(dev_ops, rhs.dev_ops);
+	swap(dev_mat, rhs.dev_mat);
+	swap(host_eigenvals, rhs.host_eigenvals);
+	swap(dev_eigenvals, rhs.dev_eigenvals);
+	swap(eigenvecs, rhs.eigenvecs);
+	// TODO: sparse_mat
+	matexp_cache = std::move(rhs.matexp_cache);
+    }
+
 public:
     DevSumOps(const SpinOp<FpType> &op)
 	: HostSumOps<FpType>(op), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
     DevSumOps(const DevSumOps &ops)
 	: HostSumOps<FpType>(ops), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
+    DevSumOps(DevSumOps &&ops) : HostSumOps<FpType>(std::move(ops)),
+				 dev_ops{}, dev_eigenvals{}, sparse_mat{} {
+	swap_internals(std::move(ops));
+    }
     template<RealScalar FpType1>
     explicit DevSumOps(const DevSumOps<FpType1> &ops)
 	: HostSumOps<FpType>(ops), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
@@ -353,6 +382,12 @@ public:
     using HostSumOps<FpType>::operator=;
     DevSumOps &operator=(const DevSumOps &rhs) {
 	HostSumOps<FpType>::operator=(rhs);
+	return *this;
+    }
+    DevSumOps &operator=(DevSumOps &&rhs) {
+	if (this == &rhs) { return *this; }
+	*this = static_cast<HostSumOps<FpType> &&>(rhs);
+	swap_internals(std::move(rhs));
 	return *this;
     }
     ~DevSumOps() { release(); }

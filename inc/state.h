@@ -64,32 +64,49 @@ class State {
 
     void check_state_index(IndexType n) const {
 	if (n >= dim()) {
-	    DbgThrow(StateIndexTooLarge, n, dim()-1);
+	    ThrowException(StateIndexTooLarge, n, dim()-1);
 	}
     }
 
 public:
+    // Default constructor. We set len to zero to indicate that the state is
+    // zero. This is so parity block operations can skip the zero parity blocks.
+    State() : len(0), curbuf(0) {}
+
     // Construct an uninitialized state vector
     State(typename SpinOp<FpType>::IndexType len) : len(len), curbuf(0) {
 	if (len == 0) {
-	    DbgThrow(InvalidArgument, "len", "cannot be zero");
+	    ThrowException(InvalidArgument, "len", "cannot be zero");
 	}
 	if (len > NUM_SPIN_SITES) {
-	    DbgThrow(InvalidArgument, "len", "cannot be larger than NUM_SPIN_SITES");
+	    ThrowException(InvalidArgument, "len", "cannot be larger than NUM_SPIN_SITES");
 	}
 	bufs.emplace_back(dim());
     }
 
     // Copy constructor. Note that copy-ctor cannot be a template.
     State(const State &st) : len(st.len), curbuf(0) {
+	if (!len) return;
 	bufs.emplace_back(dim());
 	Impl::copy_vec(dim(), buf(), st.buf());
     }
 
-    // Conversion constructor between states with different floating point precisions.
-    // In this case the conversions must be explicit.
+    // Move constructor.
+    State(State &&st) : State() {
+	using std::swap;
+	swap(len, st.len);
+	swap(bufs, st.bufs);
+	swap(curbuf, st.curbuf);
+    }
+
+    // Destructor. The dtor for bufs is called automatically by the compiler.
+    ~State() { len = 0; curbuf = 0; }
+
+    // Conversion constructor between states with different floating point
+    // precisions. In this case the conversions must be explicit.
     template<RealScalar FpType1>
     explicit State(const State<FpType1, Impl> &st) : len(st.len), curbuf(0) {
+	if (!len) return;
 	bufs.emplace_back(dim());
 	Impl::copy_vec(dim(), buf(), st.buf());
     }
@@ -99,16 +116,19 @@ public:
     // In this case the conversions must be explicit.
     template<RealScalar FpType1, typename Impl1>
     explicit State(const State<FpType1, Impl1> &st) : len(st.len), curbuf(0) {
+	if (!len) return;
 	bufs.emplace_back(static_cast<typename Impl::template VecType<FpType>>(st.bufs[st.curbuf % st.num_bufs()]));
     }
 
     // Make the state a Haar random state
     void random_state() {
+	if (!len) return;
 	Impl::init_random(dim(), buf());
     }
 
     // Make the state a zero state
     void zero_state() {
+	if (!len) return;
 	Impl::zero_vec(dim(), buf());
     }
 
@@ -126,6 +146,7 @@ public:
     // Be careful when calling this function as this returns the raw pointer to the
     // current state vector. You should never save this pointer.
     typename Impl::template BufType<FpType> buf(int i = 0) {
+	assert(len != 0);
 	assert(curbuf >= 0);
 	assert(curbuf < num_bufs());
 	assert(num_bufs() >= (i+1));
@@ -133,6 +154,7 @@ public:
     }
 
     typename Impl::template ConstBufType<FpType> buf(int i = 0) const {
+	assert(len != 0);
 	assert(curbuf >= 0);
 	assert(curbuf < num_bufs());
 	assert(num_bufs() >= (i+1));
@@ -140,12 +162,17 @@ public:
     }
 
     void inc_curbuf(int i = 1) {
+	assert(len != 0);
+	assert(num_bufs() != 0);
+	if (!len) return;
 	curbuf = (curbuf + i) % num_bufs();
     }
 
     // Allocate additional internal buffers such that total number of buffers is
     // at least n.
     void enlarge(int n) {
+	assert(len != 0);
+	if (!len) return;
 	int nbufs = num_bufs();
 	if (nbufs < n) {
 	    for (int i = 0; i < (n - nbufs); i++) {
@@ -155,6 +182,8 @@ public:
     }
 
     void swap_bufs(int i, int j) {
+	assert(len != 0);
+	if (!len) return;
 	auto n = num_bufs();
 	i += curbuf;
 	j += curbuf;
@@ -171,6 +200,8 @@ public:
     // and the tolerance used in the algorithm.
     FpType ground_state(const typename Impl::template SumOps<FpType> &ham,
 			int krydim = 3, FpType eps = 100*epsilon<FpType>()) {
+	assert(len != 0);
+	if (!len) return {};
 	assert(krydim > 1);
 	// We need krydim internal buffers for the krydim Krylov vectors, ie.
 	// v[0] = buf(0), v[1] = buf(1), ..., v[krydim-1] = buf(krydim-1).
@@ -240,40 +271,98 @@ public:
 	return energy;
     }
 
-    auto operator[](IndexType i) const { return buf()[i]; }
-    auto operator[](IndexType i) { return buf()[i]; }
+    auto operator[](IndexType i) const { assert(len); return buf()[i]; }
+    auto operator[](IndexType i) { assert(len); return buf()[i]; }
 
     // We must repeat the non-template operator= definition since the template
     // version below does not cover the non-template version (this is similar
     // to the copy-ctor case).
     State &operator=(const State &st) {
-	assert(dim() == st.dim());
 	// Guard against self-assignment
-	if (this != &st) {
-	    Impl::copy_vec(dim(), buf(), st.buf());
+	if (this == &st) {
+	    return *this;
 	}
+	assert(st.len);
+	// If dimensions match, the only thing we need to do is copying.
+	// Otherwise, if the dimensions don't match, we release all the
+	// buffers in this State and make a copy of the other State.
+	if (dim() != st.dim()) {
+	    bufs.clear();
+	    len = st.len;
+	    if (len) { bufs.emplace_back(dim()); }
+	}
+	if (len) { Impl::copy_vec(dim(), buf(), st.buf()); }
+	return *this;
+    }
+
+    // Move assignment operator
+    State &operator=(State &&st) {
+	// Just in case anyone is stupid enough to write st = std::move(st)
+	// (possibly due to aliasing: State &st1 = st0; st0 = std::move(st1)),
+	// we guard against self assignment in the move assignment op as well.
+	if (this == &st) { return *this; }
+	using std::swap;
+	swap(len, st.len);
+	swap(curbuf, st.curbuf);
+	swap(bufs, st.bufs);
 	return *this;
     }
 
     template<RealScalar FpType1>
     State &operator=(const State<FpType1,Impl> &st) {
-	assert(dim() == st.dim());
-	Impl::copy_vec(dim(), buf(), st.buf());
+	assert(st.len);
+	if (dim() != st.dim()) {
+	    bufs.clear();
+	    len = st.len;
+	    if (len) { bufs.emplace_back(dim()); }
+	}
+	if (len) { Impl::copy_vec(dim(), buf(), st.buf()); }
 	return *this;
     }
 
     State &operator+=(const State &rhs) {
+	if (len != rhs.len) {
+	    ThrowException(InvalidArgument, "dimensions of states must match");
+	}
+	assert(len);
+	if (!len) return {};
 	Impl::add_vec(dim(), buf(), rhs.buf());
 	return *this;
     }
 
     State operator+(const State &rhs) const {
+	if (len != rhs.len) {
+	    ThrowException(InvalidArgument, "dimensions of states must match");
+	}
+	assert(len);
+	if (!len) return {};
 	State res(rhs.len);
 	Impl::add_vec(dim(), res.buf(), buf(), rhs.buf());
 	return res;
     }
 
+    State &operator-=(const State &rhs) {
+	if (len != rhs.len) {
+	    ThrowException(InvalidArgument, "dimensions of states must match");
+	}
+	assert(len);
+	if (len) {
+	    Impl::add_vec(dim(), buf(), FpType(-1.0), rhs.buf());
+	}
+	return *this;
+    }
+
+    State operator-(const State &rhs) const {
+	assert(len);
+	if (!len) return {};
+	State res{*this};
+	res -= rhs;
+	return res;
+    }
+
     State &operator*=(const typename Impl::template SumOps<FpType> &ops) {
+	assert(len);
+	if (!len) return *this;
 	enlarge(2);
 	assert(num_bufs() >= 2);
 	typename Impl::template BufType<FpType> v = buf();
@@ -285,20 +374,40 @@ public:
     }
 
     State &operator*=(complex<FpType> s) {
-	Impl::scale_vec(dim(), buf(), s);
+	assert(len);
+	if (len) {
+	    Impl::scale_vec(dim(), buf(), s);
+	}
 	return *this;
     }
 
     FpType norm() const {
+	assert(len);
+	if (!len) return {};
 	return Impl::vec_norm(dim(), buf());
     }
 
     void normalize() {
+	assert(len);
+	if (!len) return;
 	*this *= 1.0 / norm();
+    }
+
+    bool operator==(const State &st) const {
+	if (len != st.len) {
+	    return false;
+	}
+	if (!len) {
+	    return true;
+	}
+	State diff{*this - st};
+	return diff.norm() == 0.0;
     }
 
     friend State operator*(const typename Impl::template SumOps<FpType> &ops,
 			   const State &s) {
+	assert(s.len);
+	if (!s.len) { return {}; }
 	State res(s.len);
 	res.zero_state();
 	Impl::apply_ops(s.len, res.buf(), ops, s.buf());
@@ -307,6 +416,8 @@ public:
 
     friend State operator*(const typename Impl::template SumOps<FpType>::MatrixType &mat,
 			   const State &st) {
+	assert(st.len);
+	if (!st.len) { return {}; }
 	if (mat.cols() != mat.rows()) {
 	    std::stringstream ss;
 	    ss << "(" << mat.cols() << ") must match its row dimension ("
@@ -328,13 +439,16 @@ public:
 
     friend complex<FpType> operator*(const State &s0, const State &s1) {
 	if (s0.dim() != s1.dim()) {
-	    DbgThrow(InvalidArgument, "Dimensions of states", "must match");
+	    ThrowException(InvalidArgument, "Dimensions of states", "must match");
 	}
+	assert(s0.len);
+	if (!s0.len) { return {}; }
 	return Impl::vec_prod(s0.dim(), s0.buf(), s1.buf());
     }
 
     friend std::ostream &operator<<(std::ostream &os, const State &s) {
 	os << "State(dim=" << s.dim() << "){";
+	if (!s.len) { os << "}"; return os; }
 	for (IndexType i = 0; i < s.dim(); i++) {
 	    if (i) {
 		os << ", ";
@@ -363,15 +477,17 @@ public:
 	     RealScalar FpType1, RealScalar FpType2, typename...Args>
     void evolve(const typename Impl::template SumOps<FpType> &ham,
 		FpType1 t, FpType2 beta = 0.0, Args&&...args) {
-	if ((t == 0.0) && (beta == 0.0)) {
-	    return;
-	}
+	assert(len);
+	if ((t == 0.0) && (beta == 0.0)) { return; }
+	if (!len) return;
 	Algo<Impl>::evolve(*this, ham, static_cast<FpType>(t),
 			   static_cast<FpType>(beta), std::forward<Args>(args)...);
     }
 
     // Release all the internal buffers allocated.
     void gc() {
+	assert(len);
+	if (!len) return;
 	assert(curbuf >= 0);
 	assert(curbuf < num_bufs());
 	if (curbuf != 0) {
@@ -401,7 +517,15 @@ struct BlockState : BlockVec<State<FpType,Impl>> {
 	normalize();
     }
 
-    void zero_state() { this->L.zero_state(); this->R.zero_state(); }
+    void zero_state() {
+	this->L.zero_state();
+	this->R.zero_state();
+	// Note here we don't set nullL and nullR to true because both L
+	// and R, despite being zero states, are not null objects (ie. they
+	// are not equal to {}, a default constructed state).
+	this->nullL = false;
+	this->nullR = false;
+    }
 
     // Length of the spin chain.
     typename SpinOp<FpType>::IndexType spin_chain_length() const {
@@ -420,37 +544,68 @@ struct BlockState : BlockVec<State<FpType,Impl>> {
 	auto g0 = this->L.ground_state(ham.LL, krydim, eps);
 	auto g1 = this->R.ground_state(ham.RR, krydim, eps);
 	if (g0 <= g1) {
-	  this->R.zero_state();
-	  return g0;
+	    this->R = {};
+	    this->nullR = true;
+	    return g0;
 	} else {
-	  this->L.zero_state();
-	  return g1;
+	    this->L = {};
+	    this->nullL = true;
+	    return g1;
 	}
     }
 
     // The compiler doesn't seem to generate this automatically so
     // we need to explicitly call the base assignment operator.
-    template<RealScalar FpType1, typename Impl1>
-    BlockState &operator=(const BlockVec<State<FpType1,Impl1>> &st) {
-	BlockVec<State<FpType,Impl>>::operator=(st);
+    template<BlockVecType B>
+    BlockState &operator=(B &&st) {
+	BlockVec<State<FpType,Impl>>::operator=(std::forward<B>(st));
 	return *this;
     }
 
-    auto operator[](size_t i) const {
+    // We cannot use automatic type deduction here because the operator[]
+    // of the State class might return a non-default construtable object.
+    complex<FpType> operator[](size_t i) const {
+	if (this->nullL && this->nullR) {
+	    return {};
+	} else if (this->nullL) {
+	    // nullR is false here
+	    auto dim = this->R.dim();
+	    if (i < dim) {
+		return {};
+	    } else {
+		return this->R[i-this->L.dim()];
+	    }
+	} else if (this->nullR) {
+	    // nullL is false here
+	    auto dim = this->L.dim();
+	    if (i < dim) {
+		return this->L[i];
+	    } else {
+		return {};
+	    }
+	}
 	return i < this->L.dim() ? this->L[i] : this->R[i-this->L.dim()];
     }
 
+    // For the non-const access operator we will have to throw if any of
+    // the parity blocks is undefined.
     auto operator[](size_t i) {
+	assert(!this->nullL && !this->nullR);
+	if (this->nullL || this->nullR) {
+	    ThrowException(InvalidArgument, "Both parity blocks must be defined.");
+	}
 	return i < this->L.dim() ? this->L[i] : this->R[i-this->L.dim()];
     }
 
     FpType norm() const {
-	auto nl = this->L.norm();
-	auto nr = this->R.norm();
+	using Ty = std::remove_reference_t<decltype(this->L.norm())>;
+	Ty nl = this->nullL ? Ty{} : this->L.norm();
+	Ty nr = this->nullR ? Ty{} : this->R.norm();
 	return std::sqrt(nl*nl + nr*nr);
     }
 
     void normalize() {
+	if (this->nullL && this->nullR) { return; }
 	*this *= 1.0 / norm();
     }
 
@@ -463,15 +618,19 @@ struct BlockState : BlockVec<State<FpType,Impl>> {
 	if ((t == 0.0) && (beta == 0.0)) {
 	    return;
 	}
-	Algo<Impl>::evolve(this->L, ham.LL, static_cast<FpType>(t),
-			   static_cast<FpType>(beta), args...);
-	Algo<Impl>::evolve(this->R, ham.RR, static_cast<FpType>(t),
-			   static_cast<FpType>(beta), std::forward<Args>(args)...);
+	if (!this->nullL) {
+	    Algo<Impl>::evolve(this->L, ham.LL, static_cast<FpType>(t),
+			       static_cast<FpType>(beta), args...);
+	}
+	if (!this->nullR) {
+	    Algo<Impl>::evolve(this->R, ham.RR, static_cast<FpType>(t),
+			       static_cast<FpType>(beta), args...);
+	}
     }
 
     // Release all the internal buffers allocated.
     void gc() {
-	this->L.gc();
-	this->R.gc();
+	if (!this->nullL) { this->L.gc(); }
+	if (!this->nullR) { this->R.gc(); }
     }
 };

@@ -53,8 +53,8 @@ protected:
 	// The u64 is the number of times that the corresponding matexp result
 	// has been accessed.
 	std::map<std::tuple<FpType,FpType>,std::tuple<MatTy,u64>> cache;
-	size_t size{};
-	// Find the least accessed matexp result and evict it
+	size_t size;
+	// Find the least accessed matexp result and evict it.
 	void evict() {
 	    auto it = cache.end();
 	    u64 hit_count = ~0ULL;
@@ -70,6 +70,16 @@ protected:
 	}
     public:
 	using ImplTy = Impl;
+	MatexpCache() : size{} {}
+	// We cannot copy the matexp cache (well we could, but since copying
+	// may fill the cache space we'd have to throw an exception during
+	// copy in that case, which is problematic as it prevents the SumOps
+	// class from being successfully copied).
+	MatexpCache(const MatexpCache &) = delete;
+	MatexpCache &operator=(const MatexpCache &) = delete;
+	// Moving the cache is fine though.
+	MatexpCache(MatexpCache &&) = default;
+	MatexpCache &operator=(MatexpCache &&) = default;
 	std::tuple<bool, const MatTy &> find(complex<FpType> c) {
 	    auto it = cache.find({c.real(), c.imag()});
 	    if (it != cache.end()) {
@@ -119,6 +129,13 @@ public:
     // We can implicitly convert a spin operator into a HostSumOps with one term
     HostSumOps(const SpinOp<FpType> &op) : ops{op} {}
 
+    // When copy constructing we will not copy the internal mutable states. This
+    // is to save space (also the matexp cache cannot be copied).
+    HostSumOps(const HostSumOps &op) : ops{op.ops} {}
+
+    // For move construction, it is safe to swap the internal mutable states.
+    HostSumOps(HostSumOps &&op) = default;
+
     // Conversion between sum operators of different floating point precision
     // must be explicit.
     template<RealScalar FpType1>
@@ -144,16 +161,18 @@ public:
     // base pointer, but it's a good habit to do so).
     virtual ~HostSumOps() {}
 
-    // Assignment operator. We must release the internal mutable state.
+    // Copy assignment operator. We don't copy the cached results, just like
+    // in the case of copy constructor.
     HostSumOps &operator=(const HostSumOps &rhs) {
 	// Guard against self assignment
-	if (this == &rhs) {
-	    return *this;
-	}
+	if (this == &rhs) { return *this; }
 	release();
 	ops = rhs.ops;
 	return *this;
     }
+
+    // Move assignment operator. We can move the cached results.
+    HostSumOps &operator=(HostSumOps &&rhs) = default;
 
     // Assignment operator. We must release the internal mutable state.
     // Note here we must convert the floating point type.
