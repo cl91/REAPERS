@@ -44,10 +44,10 @@ TEST_CASE("single site multiplication") {
 }
 
 TEST_CASE("matrix representation") {
-    auto i = complex<>{0,1};
+    auto i = std::complex<double>{0,1};
     MatrixType m(1,1);
     m << 1;
-    SumOps ops = id;
+    HostSumOps ops = id;
     CHECK(ops.get_matrix(0) == m);
     m.resize(2,2);
     m << 1, 0, 0, 1;
@@ -168,7 +168,7 @@ bool almost_equal(const T &m0, const T &m1)
 
 bool eigensys_ok(SpinOp<> op, int len, EigenVals evals, EigenVecs evecs)
 {
-    SumOps ops(op);
+    HostSumOps ops(op);
     auto eisys = ops.get_eigensystem(len);
     auto vals = std::get<0>(eisys);
     auto vecs = std::get<1>(eisys);
@@ -186,7 +186,7 @@ TEST_CASE("eigenvalues and eigenvectors") {
     vecs << -1.0/sqrt2, 1.0/sqrt2,
 	1.0/sqrt2, 1.0/sqrt2;
     CHECK(eigensys_ok(sx, 1, vals, vecs));
-    auto i = complex<>{0,1};
+    auto i = std::complex<double>{0,1};
     vecs << 1.0/sqrt2, 1.0/sqrt2,
 	-i/sqrt2, i/sqrt2;
     CHECK(eigensys_ok(sy, 1, vals, vecs));
@@ -196,7 +196,7 @@ TEST_CASE("eigenvalues and eigenvectors") {
 }
 
 TEST_CASE("matrix exponentials") {
-    SumOps ops(id);
+    HostSumOps ops(id);
     EigenVecs m(2, 2);
     m << 2.71828182845905, 0,
 	0, 2.71828182845905;
@@ -206,7 +206,7 @@ TEST_CASE("matrix exponentials") {
 	1.17520119364380, 1.54308063481524;
     CHECK(almost_equal(ops.matexp(1, 1), m));
     ops = sy;
-    auto i = complex<>{0,1};
+    auto i = std::complex<double>{0,1};
     m << 1.54308063481524, -1.17520119364380*i,
 	1.17520119364380*i, 1.54308063481524;
     CHECK(almost_equal(ops.matexp(1, 1), m));
@@ -217,15 +217,15 @@ TEST_CASE("matrix exponentials") {
     ops = sx;
     m << 0.540302305868140, 0.841470984807897*i,
 	0.841470984807897*i, 0.540302305868140;
-    CHECK(almost_equal(ops.matexp(i, 1), m));
+    CHECK(almost_equal(ops.matexp({0,1}, 1), m));
     ops = sy;
     m << 0.540302305868140, 0.841470984807897,
 	-0.841470984807897, 0.540302305868140;
-    CHECK(almost_equal(ops.matexp(i, 1), m));
+    CHECK(almost_equal(ops.matexp({0,1}, 1), m));
     ops = sz;
     m << 0.540302305868140 + 0.841470984807897*i, 0,
 	0, 0.540302305868140 - 0.841470984807897*i;
-    CHECK(almost_equal(ops.matexp(i, 1), m));
+    CHECK(almost_equal(ops.matexp({0,1}, 1), m));
 }
 
 TEST_CASE("spin operator equality") {
@@ -299,9 +299,9 @@ TEST_CASE("subtraction") {
 TEST_CASE("fermion ops commutative relation") {
     double one = (1.0/sqrt2)*(1.0/sqrt2)*2;
     for (int N = 4; N <= 20; N += 2) {
-	SYK syk(N, 0.0, 1.0, true);
+	SYKNonBlockForm syk(N, 0.0, 1.0, true);
 	auto gamma = syk.fermion_ops();
-	SYK syk2(N, 0.0, 1.0, false);
+	SYKNonBlockForm syk2(N, 0.0, 1.0, false);
 	auto gamma2 = syk2.fermion_ops();
 	for (int i = 0; i < N; i++) {
 	    for (int j = 0; j < N; j++) {
@@ -314,6 +314,32 @@ TEST_CASE("fermion ops commutative relation") {
 		}
 		auto comm2 = gamma2[i]*gamma2[j]+gamma2[j]*gamma2[i];
 		CHECK((comm2 == ((i == j) ? 2 : 0)));
+	    }
+	}
+    }
+}
+
+TEST_CASE("fermion ops commutative relation, in parity blocks") {
+    double one = (1.0/sqrt2)*(1.0/sqrt2)*2;
+    for (int N = 4; N <= 20; N += 2) {
+	SYKBlockForm syk(N, 0.0, 1.0, true);
+	auto gamma = syk.fermion_ops();
+	SYKBlockForm syk2(N, 0.0, 1.0, false);
+	auto gamma2 = syk2.fermion_ops();
+	for (int i = 0; i < N; i++) {
+	    for (int j = 0; j < N; j++) {
+		auto comm = gamma[i]*gamma[j]+gamma[j]*gamma[i];
+		if (i != j) {
+		    CHECK(comm.LL == 0);
+		    CHECK(comm.RR == 0);
+		} else {
+		    // Due to numerical limit 2*(1/sqrt2)^2 is not exactly 1.
+		    CHECK(comm.RR == one);
+		    CHECK(comm.LL == one);
+		}
+		auto comm2 = gamma2[i]*gamma2[j]+gamma2[j]*gamma2[i];
+		CHECK((comm2.LL == ((i == j) ? 2 : 0)));
+		CHECK((comm2.RR == ((i == j) ? 2 : 0)));
 	    }
 	}
     }

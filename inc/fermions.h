@@ -88,8 +88,10 @@ public:
 	return SubspaceView(len, SumOpsTy::operator+(rhs));
     }
 
-    friend SubspaceView operator+(const SumOpsTy &lhs, const SubspaceView &rhs) {
-	return SubspaceView(rhs.len, lhs.SumOpsTy::operator+(rhs));
+    template<typename OpTy>
+    friend SubspaceView operator+(OpTy &&lhs, const SubspaceView &rhs) {
+	return SubspaceView{rhs.len,
+	    std::forward<OpTy>(lhs) + static_cast<const SumOpsTy &>(rhs)};
     }
 
     SubspaceView operator+(const SubspaceView &rhs) const {
@@ -117,8 +119,10 @@ public:
 	return SubspaceView(len, SumOpsTy::operator-(rhs));
     }
 
-    friend SubspaceView operator-(const SumOpsTy &lhs, const SubspaceView &rhs) {
-	return SubspaceView(rhs.len, lhs.SumOpsTy::operator-(rhs));
+    template<typename OpTy>
+    friend SubspaceView operator-(OpTy &&lhs, const SubspaceView &rhs) {
+	return SubspaceView{rhs.len,
+	    std::forward<OpTy>(lhs) - static_cast<const SumOpsTy &>(rhs)};
     }
 
     SubspaceView operator-(const SubspaceView &rhs) const {
@@ -143,8 +147,10 @@ public:
 	return SubspaceView(len, SumOpsTy::operator*(rhs));
     }
 
-    friend SubspaceView operator*(const SumOpsTy &lhs, const SubspaceView &rhs) {
-	return SubspaceView(rhs.len, lhs.SumOpsTy::operator*(rhs));
+    template<typename OpTy>
+    friend SubspaceView operator*(OpTy &&lhs, const SubspaceView &rhs) {
+	return SubspaceView{rhs.len,
+	    std::forward<OpTy>(lhs) * static_cast<const SumOpsTy &>(rhs)};
     }
 
     SubspaceView operator*(const SubspaceView &rhs) const {

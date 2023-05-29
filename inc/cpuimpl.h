@@ -713,6 +713,10 @@ public:
     static void apply_ops(typename SpinOp<FpType>::IndexType len, BufType<FpType> res,
 			  const HostSumOps<FpType> &ops, ConstBufType<FpType> vec) {
 	assert(len <= 64);
+	if (ops.size() >= (1ULL << len)) {
+	    mat_mul(1ULL << len, res, ops.get_matrix(len), vec);
+	    return;
+	}
 	#pragma omp parallel for
 	for (VecSizeType<FpType> i = 0; i < (VecSizeType<FpType>(1) << len); i++) {
 	    for (const auto &op : ops) {

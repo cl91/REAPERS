@@ -79,13 +79,13 @@ concept BlockDiagType = BareTypeSpecializes<B, BlockDiag>;
 // the other block matrix forms as well.
 template<BareType T>
 struct BlockDiag {
-    T LL, RR;
     // nullLL indicates that LL is a zero block, ie. LL == T{}.
     // This allows us to skip the additions and multiplications below
     // if a block is zero. Likewise for the other Block classes below.
     bool nullLL, nullRR;
+    T LL, RR;
 
-    BlockDiag() : LL{}, RR{}, nullLL(true), nullRR(true) {}
+    BlockDiag() : nullLL(true), nullRR(true), LL{}, RR{} {}
     BlockDiag(T LL, T RR) : LL(LL), RR(RR) {
 	// Note: due to issues with ISO C++ ambiguous comparison operators
 	// we cannot write nullLL = (LL == T{}) as this would generate a
@@ -98,6 +98,7 @@ struct BlockDiag {
 
     BlockDiag(const BlockDiag &) = default;
     BlockDiag(BlockDiag &&) = default;
+    bool operator==(const BlockDiag &) const = default;
 
     template<BlockDiagType T1>
     explicit BlockDiag(T1 &&b) : LL(_REAPERS_forward(T1,b,LL)),
@@ -188,10 +189,10 @@ concept BlockAntiDiagType = BareTypeSpecializes<B, BlockAntiDiag>;
 //        ( bRL  0  )
 template<BareType T>
 struct BlockAntiDiag {
-    T LR, RL;
     bool nullLR, nullRL;
+    T LR, RL;
 
-    BlockAntiDiag() : LR{}, RL{}, nullLR(true), nullRL(true) {}
+    BlockAntiDiag() : nullLR(true), nullRL(true), LR{}, RL{} {}
     BlockAntiDiag(T LR, T RL) : LR(LR), RL(RL) {
 	T empty{};
 	nullLR = (LR == empty);
@@ -200,6 +201,7 @@ struct BlockAntiDiag {
 
     BlockAntiDiag(const BlockAntiDiag &) = default;
     BlockAntiDiag(BlockAntiDiag &&) = default;
+    bool operator==(const BlockAntiDiag &) const = default;
 
     template<BlockAntiDiagType T1>
     explicit BlockAntiDiag(T1 &&b) : LR(_REAPERS_forward(T1,b,LR)),
@@ -283,6 +285,7 @@ struct BlockOp : BlockDiag<T>, BlockAntiDiag<T> {
 
     BlockOp(const BlockOp &) = default;
     BlockOp(BlockOp &&) = default;
+    bool operator==(const BlockOp &) const = default;
 
     template<BlockDiagType T1>
     explicit BlockOp(T1 &&b) : BlockDiag<T>(std::forward<T1>(b)) {}
@@ -372,13 +375,14 @@ concept BlockVecType = BareTypeSpecializes<B, BlockVec>;
 //        (R)
 template<BareType T>
 struct BlockVec {
-    T L, R;
     bool nullL, nullR;
+    T L, R;
 
-    BlockVec(T L = {}, T R = {}) : L(L), R(R), nullL{L==T{}}, nullR{R==T{}} {}
+    BlockVec(T L = {}, T R = {}) : nullL{L==T{}}, nullR{R==T{}}, L(L), R(R) {}
 
     BlockVec(const BlockVec &) = default;
     BlockVec(BlockVec &&) = default;
+    bool operator==(const BlockVec &) const = default;
 
     template<BlockVecType T1>
     BlockVec(T1 &&b) : L(_REAPERS_forward(T1,b,L)), R(_REAPERS_forward(T1,b,R)),

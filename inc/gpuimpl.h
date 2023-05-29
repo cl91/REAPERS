@@ -303,26 +303,23 @@ private:
     mutable EigenVals host_eigenvals;
     mutable FpType *dev_eigenvals;
     mutable std::unique_ptr<EigenVecs> eigenvecs;
-    mutable void *sparse_mat;
     // Note this hides the matexp_cache member of the parent class.
     mutable HostSumOps<FpType>::template MatexpCache<MatrixType,GPUImpl> matexp_cache;
 
     // Upload the host summed operators to the device. If the number of operators
     // is less than 2^len, then simply copy the operators to the device side.
-    // Otherwise, generate the CUSPARSE matrix representing the sum of operators.
+    // Otherwise, generate the (dense) matrix representing the sum of operators.
     void upload(typename SpinOp<FpType>::IndexType len) const {
-	if (dev_ops || sparse_mat) {
+	if (dev_ops || dev_mat) {
 	    return;
 	}
-//	    if (ops.size() < (1ULL << len)) {
-	if (true) {
+	if (this->ops.size() < (1ULL << len)) {
 	    auto size = this->ops.size() * sizeof(SpinOp<FpType>);
 	    cuda_alloc(dev_ops, size);
 	    CUDA_CALL(cudaMemcpy(dev_ops, this->ops.data(),
 				 size, cudaMemcpyHostToDevice));
 	} else {
-	    // TODO!
-	    assert(false);
+	    get_matrix(len);
 	}
     }
 
@@ -343,11 +340,6 @@ private:
 	    cudaFree(dev_eigenvals);
 	    dev_eigenvals = nullptr;
 	}
-	if (sparse_mat) {
-	    /* FREE sparse_mat */
-	    assert(false);
-	    sparse_mat = nullptr;
-	}
     }
 
     void mini_release() const {
@@ -362,26 +354,25 @@ private:
 	swap(host_eigenvals, rhs.host_eigenvals);
 	swap(dev_eigenvals, rhs.dev_eigenvals);
 	swap(eigenvecs, rhs.eigenvecs);
-	// TODO: sparse_mat
 	matexp_cache = std::move(rhs.matexp_cache);
     }
 
 public:
     DevSumOps(const SpinOp<FpType> &op)
-	: HostSumOps<FpType>(op), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
+	: HostSumOps<FpType>(op), dev_ops{}, dev_eigenvals{} {}
+    DevSumOps(const HostSumOps<FpType> &ops)
+	: HostSumOps<FpType>(ops), dev_ops{}, dev_eigenvals{} {}
     DevSumOps(const DevSumOps &ops)
-	: HostSumOps<FpType>(ops), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
+	: HostSumOps<FpType>(ops), dev_ops{}, dev_eigenvals{} {}
     DevSumOps(DevSumOps &&ops) : HostSumOps<FpType>(std::move(ops)),
-				 dev_ops{}, dev_eigenvals{}, sparse_mat{} {
+				 dev_ops{}, dev_eigenvals{} {
 	swap_internals(std::move(ops));
     }
     template<RealScalar FpType1>
     explicit DevSumOps(const DevSumOps<FpType1> &ops)
-	: HostSumOps<FpType>(ops), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
-    explicit DevSumOps(const HostSumOps<FpType> &ops)
-	: HostSumOps<FpType>(ops), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
+	: HostSumOps<FpType>(ops), dev_ops{}, dev_eigenvals{} {}
     DevSumOps(const std::initializer_list<SpinOp<FpType>> &l = {})
-	: HostSumOps<FpType>(l), dev_ops{}, dev_eigenvals{}, sparse_mat{} {}
+	: HostSumOps<FpType>(l), dev_ops{}, dev_eigenvals{} {}
     using HostSumOps<FpType>::operator=;
     DevSumOps &operator=(const DevSumOps &rhs) {
 	HostSumOps<FpType>::operator=(rhs);

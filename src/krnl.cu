@@ -180,8 +180,11 @@ void GPUImpl::add_vec(size_t size, complex<FpType> *res,
 // Compute res = ops * vec. res and vec are assumed to be different.
 template<RealScalar FpType>
 void GPUImpl::apply_ops(typename SpinOp<FpType>::IndexType len, BufType<FpType> res,
-			const SumOps<FpType> &ops, ConstBufType<FpType> vec) {
+			const DevSumOps<FpType> &ops, ConstBufType<FpType> vec) {
     ops.upload(len);
+    // dev_mat can be generated due to calls to get_eigensystem etc, so we
+    // must check dev_ops to see if the Hamiltonian is sparse (ie. has fewer
+    // terms than 1<<len).
     if (ops.dev_ops != 0) {
 	int blocksize, gridsize;
 	get_block_grid_size(1ULL << len, blocksize, gridsize);
@@ -191,7 +194,7 @@ void GPUImpl::apply_ops(typename SpinOp<FpType>::IndexType len, BufType<FpType> 
 	    (CudaComplexConstPtr<FpType>)vec.dev_ptr);
 	cuda_sync();
     } else {
-	assert(ops.sparse_mat != nullptr);
+	mat_mul(1ULL << len, res, *ops.dev_mat, vec);
     }
 }
 
@@ -263,11 +266,11 @@ template void GPUImpl::add_vec(size_t size, complex<double> *res,
 			       const complex<double> *v0, const complex<double> *v1);
 template void GPUImpl::apply_ops(typename SpinOp<float>::IndexType len,
 				 BufType<float> res,
-				 const SumOps<float> &ops,
+				 const DevSumOps<float> &ops,
 				 ConstBufType<float> vec);
 template void GPUImpl::apply_ops(typename SpinOp<double>::IndexType len,
 				 BufType<double> res,
-				 const SumOps<double> &ops,
+				 const DevSumOps<double> &ops,
 				 ConstBufType<double> vec);
 template void GPUImpl::eye<float>(typename DevSumOps<float>::MatrixType &res);
 template void GPUImpl::eye<double>(typename DevSumOps<double>::MatrixType &res);
