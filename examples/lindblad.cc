@@ -86,7 +86,7 @@ class Eval : protected ArgParser {
     template<RealScalar FpType>
     void evolve(BlockOp<MatrixType<FpType>> &psi,
 		const HamOp<FpType> &ham, float t) {
-	auto expmat = ham.matexp(complex<FpType>{0,-t}, N/2-1);
+	auto expmat = ham.matexp(complex<FpType>{0,-t});
 	psi = expmat * psi;
     }
 

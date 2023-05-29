@@ -126,6 +126,9 @@ class DevSumOps : public HostSumOps<FpType> {
     using Impl = GPUImpl;
 
 public:
+    using RealScalarType = FpType;
+    using ComplexScalarType = complex<FpType>;
+
     // This class is exposed to the end user so we need to be especially careful.
     class MatrixType {
 	friend class GPUImpl;

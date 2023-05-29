@@ -101,7 +101,7 @@ struct GenHamResponse {
 	js["N"] = N;
 	js["ham"] = ::to_json(ham);
 	js["hamstr"] = hamstr;
-	js["mat"] = ::to_json(ham.get_matrix(N/2));
+	js["mat"] = ::to_json(ham.get_matrix());
 	return js;
     }
 };
@@ -156,11 +156,41 @@ struct EvolveStateResponse : GenHamResponse {
 struct MatexpResponse : GenHamResponse {
     MatrixType res;
     MatexpResponse(const EvolveStateRequest &req) : GenHamResponse(req) {
-	res = ham.matexp({-req.beta, -req.t}, req.N/2);
+	res = ham.matexp({-req.beta, -req.t});
     }
     json to_json() const {
 	json js = GenHamResponse::to_json();
 	js["res"] = ::to_json(res);
+	return js;
+    }
+};
+
+double get_matrix_sparsity(const MatrixType &mat) {
+    size_t nzc{};
+    for (ssize_t i = 0; i < mat.rows(); i++) {
+	for (ssize_t j = 0; j < mat.cols(); j++) {
+	    if (mat(i,j) != complex<>{}) {
+		nzc++;
+	    }
+	}
+    }
+    return 1.0 - (double)nzc/(double)mat.size();
+}
+
+struct GetSparsityResponse {
+    double sparsityL, sparsityR;
+    GetSparsityResponse(const GenHamRequest &req) {
+	SYKBlockForm<> syk(req.N, req.sparsity);
+	std::random_device rd;
+	std::mt19937 rg(rd());
+	auto ham = syk.gen_ham(rg, req.regularize);
+	sparsityL = get_matrix_sparsity(ham.LL.get_matrix());
+	sparsityR = get_matrix_sparsity(ham.RR.get_matrix());
+    }
+    json to_json() const {
+	json js;
+	js["sparsityL"] = sparsityL;
+	js["sparsityR"] = sparsityR;
 	return js;
     }
 };
@@ -181,6 +211,9 @@ void run() {
     } else if (req == "matexp") {
 	// matexp shares the same request params as evolve-state
 	reply = MatexpResponse(EvolveStateRequest(params)).to_json();
+    } else if (req == "get-ham-sparsity") {
+	// get-ham-sparsity shares the same request params as gen-ham
+	reply = GetSparsityResponse(GenHamRequest(params)).to_json();
     } else {
 	throw std::runtime_error(std::string("Unknown request ") + req);
     }

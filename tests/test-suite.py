@@ -198,6 +198,10 @@ def gen_ham_printnorm(req, reply):
     mat = cmat_to_numpy(reply["mat"])
     print(f"Diff norm of dynamite mat vs ours {diff_norm(dyn_mat, mat)}")
 
+def gen_ham_print_sparsity(req, reply):
+    print(f"Sparsity of left block: {reply['sparsityL']}")
+    print(f"Sparsity of right block: {reply['sparsityR']}")
+
 def get_eigensys_genreq(N):
     return { "N" : N, "sparsity" : 0.0, "regularize" : False }
 
@@ -283,7 +287,8 @@ tests = { "gen-ham" : (gen_ham_genreq, gen_ham_test),
 
 funclets = { "gen-ham" : (gen_ham_genreq, gen_ham_printnorm),
              "evolve-state" : (evolve_state_genreq, evolve_state_printnorm),
-             "matexp" : (matexp_genreq, matexp_printnorm) }
+             "matexp" : (matexp_genreq, matexp_printnorm),
+             "get-ham-sparsity" : (gen_ham_genreq, gen_ham_print_sparsity) }
 
 # Get the test or funclet to run
 def get(name, d, ty_str):

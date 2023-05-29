@@ -43,6 +43,8 @@ public:
 				     Eigen::Dynamic, Eigen::Dynamic>;
     using EigenVals = Eigen::Matrix<FpType, Eigen::Dynamic, 1>;
     using EigenVecs = MatrixType;
+    using RealScalarType = FpType;
+    using ComplexScalarType = complex<FpType>;
 
 protected:
     // Cache for the matexp results. We implement a simple LRU (least recently
@@ -215,6 +217,8 @@ public:
     // We don't allow the user to modify the operators using iterators.
     auto begin() const { return std::cbegin(ops); }
     auto end() const { return std::cend(ops); }
+    auto empty() const { return ops.empty(); }
+    auto size() const { return ops.size(); }
 
     // Add another spin operator to the summed operators. If we already have the
     // same spin operator (except with potentially a different coefficient) in the
@@ -440,7 +444,7 @@ public:
     // should NOT call this function if you want to compute state evolution
     // (especially if you want to use Krylov). Call State::evolve() instead.
     // Here len is the length of the spin chain.
-    MatrixType matexp(complex<FpType> c, int len) const {
+    const MatrixType &matexp(complex<FpType> c, int len) const {
 	return _matexp_helper(*this, c, len);
     }
 

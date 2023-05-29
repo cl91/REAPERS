@@ -30,14 +30,14 @@ void otoc(int N, double beta, double tmax, int nsteps)
     // Define the operators we want for the OTOC.
     Matrix A = syk.fermion_ops(N-1);
     Matrix B = syk.fermion_ops(N-2);
-    // Compute exp(-beta H/4). Here N/2 is the length of the spin chain.
-    Matrix rq = ham.matexp(-beta/4, N/2);
+    // Compute exp(-beta H/4).
+    Matrix rq = ham.matexp(-beta/4);
     // We compute t = 0..tmax with nsteps
     std::vector<complex<double>> v(nsteps+1);
     for (int i = 0; i <= nsteps; i++) {
 	auto t = tmax * i / nsteps;
-	Matrix Ax = A * ham.matexp({0,-t}, N/2);
-	Matrix At = ham.matexp({0,t}, N/2) * Ax;
+	Matrix Ax = A * ham.matexp(-t*1_i);
+	Matrix At = ham.matexp(t*1_i) * Ax;
 	Matrix twopt = rq * At * rq * B;
 	v[i] = (twopt * twopt).trace();
     }

@@ -24,6 +24,172 @@ Revision History:
 #include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
 #endif
 
+template<typename T>
+class SubspaceView;
+
+template<typename T>
+concept SubspaceViewType = BareTypeSpecializes<T, SubspaceView>;
+
+// A SubspaceView of a SumOps is simply a SumOps with the spin chain length
+// fixed. In other words, it's as if SumOps has been projected into the sub-
+// space defined by the spin sites from 0 to len-1. We define this template
+// class to improve the ergonomics of get_matrix and friends. In the future
+// we might extend this class to encompass general subspaces of a contiguous
+// range of spin sites (ie. those with non-zero starting spin site).
+template<typename SumOpsTy>
+class SubspaceView : public SumOpsTy {
+    template<typename SumOpsTy1>
+    friend class SubspaceView;
+
+    // Spin chain length of the subspace
+    int len;
+
+    void ensure_equal_len(const SubspaceView &rhs) const {
+	if (this->empty() || rhs.empty()) {
+	    if (this->empty()) { assert(!len); }
+	    if (rhs.empty()) { assert(!rhs.len); }
+	    // If one of the view is empty, we don't check for spin chain length.
+	    return;
+	}
+	if (len != rhs.len) {
+	    ThrowException(InvalidArgument,
+			   "spin chain length", "must be equal");
+	}
+    }
+
+public:
+    SubspaceView() : len{} {}
+    template<typename SumOpsTy1>
+    SubspaceView(int len, SumOpsTy1 &&ops)
+	: SumOpsTy(std::forward<SumOpsTy1>(ops)), len(len) {}
+    SubspaceView(const SubspaceView &) = default;
+    SubspaceView(SubspaceView &&) = default;
+    SubspaceView &operator=(const SubspaceView &) = default;
+    SubspaceView &operator=(SubspaceView &&) = default;
+
+    template<typename SumOpsTy1>
+    SubspaceView(const SubspaceView<SumOpsTy1> &view)
+	: SumOpsTy(view.ops), len(view.len) {}
+
+    template<SubspaceViewType V>
+    SubspaceView &operator=(V &&v) {
+	SumOpsTy::operator=(std::forward<V>(v));
+	len = v.len;
+	return *this;
+    }
+
+    using SumOpsTy::operator+=;
+    using SumOpsTy::operator-=;
+    using SumOpsTy::operator*=;
+    using SumOpsTy::operator/=;
+    using SumOpsTy::operator==;
+
+    SubspaceView operator+(const SumOpsTy &rhs) const {
+	return SubspaceView(len, SumOpsTy::operator+(rhs));
+    }
+
+    friend SubspaceView operator+(const SumOpsTy &lhs, const SubspaceView &rhs) {
+	return SubspaceView(rhs.len, lhs.SumOpsTy::operator+(rhs));
+    }
+
+    SubspaceView operator+(const SubspaceView &rhs) const {
+	ensure_equal_len(rhs);
+	if (len) {
+	    return *this + static_cast<const SumOpsTy &>(rhs);
+	} else {
+	    // If this view is empty, we return the other view;
+	    assert(this->empty());
+	    return rhs;
+	}
+    }
+
+    SubspaceView &operator+=(const SubspaceView &rhs) {
+	ensure_equal_len(rhs);
+	if (len) {
+	    SumOpsTy::operator+=(rhs);
+	} else {
+	    *this = rhs;
+	}
+	return *this;
+    }
+
+    SubspaceView operator-(const SumOpsTy &rhs) const {
+	return SubspaceView(len, SumOpsTy::operator-(rhs));
+    }
+
+    friend SubspaceView operator-(const SumOpsTy &lhs, const SubspaceView &rhs) {
+	return SubspaceView(rhs.len, lhs.SumOpsTy::operator-(rhs));
+    }
+
+    SubspaceView operator-(const SubspaceView &rhs) const {
+	ensure_equal_len(rhs);
+	if (len) {
+	    return *this - static_cast<const SumOpsTy &>(rhs);
+	} else {
+	    return static_cast<const SumOpsTy &>(*this) - rhs;
+	}
+    }
+
+    SubspaceView &operator-=(const SubspaceView &rhs) {
+	ensure_equal_len(rhs);
+	if (!len) {
+	    len = rhs.len;
+	}
+	SumOpsTy::operator-=(rhs);
+	return *this;
+    }
+
+    SubspaceView operator*(const SumOpsTy &rhs) const {
+	return SubspaceView(len, SumOpsTy::operator*(rhs));
+    }
+
+    friend SubspaceView operator*(const SumOpsTy &lhs, const SubspaceView &rhs) {
+	return SubspaceView(rhs.len, lhs.SumOpsTy::operator*(rhs));
+    }
+
+    SubspaceView operator*(const SubspaceView &rhs) const {
+	ensure_equal_len(rhs);
+	return static_cast<const SumOpsTy &>(*this) * rhs;
+    }
+
+    SubspaceView &operator*=(const SubspaceView &rhs) {
+	ensure_equal_len(rhs);
+	SumOpsTy::operator*=(rhs);
+	return *this;
+    }
+
+    bool operator==(const SubspaceView &rhs) const {
+	if (len != rhs.len) { return false; }
+	return SumOpsTy::operator==(rhs);
+    }
+
+    int spin_chain_length() const { return len; }
+
+    using MatrixType = typename SumOpsTy::MatrixType;
+
+    const MatrixType &get_matrix() const {
+	return SumOpsTy::get_matrix(spin_chain_length());
+    }
+
+    operator const MatrixType &() const {
+	return get_matrix();
+    }
+
+    // SumOps doesn't define operator* with MatrixType (because it
+    // doesn't store the spin chain length) so we must define it here
+    MatrixType operator*(const MatrixType &psi) const {
+	return get_matrix() * psi;
+    }
+
+    const MatrixType &matexp(typename SumOpsTy::RealScalarType c) const {
+	return SumOpsTy::matexp(c, spin_chain_length());
+    }
+
+    const MatrixType &matexp(typename SumOpsTy::ComplexScalarType c) const {
+	return SumOpsTy::matexp(c, spin_chain_length());
+    }
+};
+
 // This class represents the n-th Majorana fermion field operator b_n. Some common
 // alternative notations for this is $\gamma_n$, $\phi_n$ or $\chi_n$. In what
 // follows we will use b_n and gamma_n interchangeably. If standard_gamma is set to
@@ -72,7 +238,8 @@ Revision History:
 // Here {sy or sz} is sy when n is odd and sz when n is even. and is simply not
 // present when n=0.
 template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
-class FermionNonBlockOp : public Impl::template SumOps<FpType> {
+class FermionOpNonBlockForm : public SubspaceView<typename Impl::template SumOps<FpType>> {
+    using BaseType = SubspaceView<typename Impl::template SumOps<FpType>>;
     using IndexType = u8;
     IndexType N, n;
 
@@ -89,15 +256,15 @@ class FermionNonBlockOp : public Impl::template SumOps<FpType> {
     }
 
 public:
-    // Product of two fermion operators is another spin operator (a SumOps
-    // with one term). We can probably have the compiler deduce this using
-    // some decltype magic, but let's not do that.
-    using ProductType = typename Impl::template SumOps<FpType>;
+    using ProductType = BaseType;
 
     // Construct the n-th Fermion field operator using the formula discussed above
-    FermionNonBlockOp(IndexType N, IndexType n, bool standard_gamma = true)
-	: Impl::template SumOps<FpType>(SpinOp<FpType>::identity()), N(N), n(n) {
+    FermionOpNonBlockForm(IndexType N, IndexType n, bool standard_gamma = true)
+	: BaseType(N/2, SpinOp<FpType>::identity()), N(N), n(n) {
 	check_field_index(N, n);
+	static_assert(std::is_same_v<ProductType,
+		      std::remove_cvref_t<decltype(*this * *this)>>,
+		      "Incorrect product type of fermion operators");
 	for (int i = (n+1)/2; i < N/2; i++) {
 	    *this *= SpinOp<FpType>::sigma_x(i);
 	}
@@ -114,27 +281,14 @@ public:
 	}
     }
 
-    using Impl::template SumOps<FpType>::operator+;
-    using Impl::template SumOps<FpType>::operator-;
-    using Impl::template SumOps<FpType>::operator*;
-    using Impl::template SumOps<FpType>::operator+=;
-    using Impl::template SumOps<FpType>::operator-=;
-    using Impl::template SumOps<FpType>::operator*=;
-    using Impl::template SumOps<FpType>::operator/=;
-    using Impl::template SumOps<FpType>::operator==;
-
-    int spin_chain_length() const { return N/2; }
-
-    using MatrixType = typename Impl::template SumOps<FpType>::MatrixType;
-    operator MatrixType() const {
-	return this->get_matrix(spin_chain_length());
-    }
-
-    // Impl::SumOps doesn't define operator* with MatrixType (because
-    // it doesn't store the spin chain length) so we must define it here
-    MatrixType operator*(const MatrixType &psi) const {
-	return this->operator MatrixType() * psi;
-    }
+    using BaseType::operator+;
+    using BaseType::operator-;
+    using BaseType::operator*;
+    using BaseType::operator+=;
+    using BaseType::operator-=;
+    using BaseType::operator*=;
+    using BaseType::operator/=;
+    using BaseType::operator==;
 };
 
 // This class represents the n-th Majorana fermion field operator b_n in
@@ -157,7 +311,9 @@ public:
 // and for i == N-1, bLR is simply -i times the identity matrix (divided by
 // sqrt2 if needed), and bRL is simply i times the identity matrix (div. sqrt2).
 template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
-class FermionBlockOp : public BlockAntiDiag<typename Impl::template SumOps<FpType>> {
+class FermionOpBlockForm
+    : public BlockAntiDiag<SubspaceView<typename Impl::template SumOps<FpType>>> {
+    using BaseType = SubspaceView<typename Impl::template SumOps<FpType>>;
     using IndexType = u8;
     IndexType N, n;
 
@@ -175,51 +331,33 @@ class FermionBlockOp : public BlockAntiDiag<typename Impl::template SumOps<FpTyp
 
 public:
     // Product of two fermion operators is block diagonal.
-    using ProductType = BlockDiag<typename Impl::template SumOps<FpType>>;
+    using ProductType = BlockDiag<BaseType>;
 
     // Construct the n-th Fermion field operator using the formula discussed above
-    FermionBlockOp(IndexType N, IndexType n, bool standard_gamma = true) :
-	BlockAntiDiag<typename Impl::template SumOps<FpType>>(
-	    SpinOp<FpType>::identity(), SpinOp<FpType>::identity()), N(N), n(n) {
+    FermionOpBlockForm(IndexType N, IndexType n, bool standard_gamma = true) :
+	BlockAntiDiag<BaseType>({N/2-1, SpinOp<FpType>::identity()},
+				{N/2-1, SpinOp<FpType>::identity()}), N(N), n(n) {
 	check_field_index(N, n);
+	static_assert(std::is_same_v<ProductType,
+		      std::remove_cvref_t<decltype(*this * *this)>>,
+		      "Incorrect product type of fermion operators");
 	if (n == (N-1)) {
 	    this->LR *= complex<FpType>{0, -1};
 	    this->RL *= complex<FpType>{0, 1};
 	} else {
-	    for (int i = (n+1)/2; i < N/2-1; i++) {
-		this->LR *= SpinOp<FpType>::sigma_x(i);
-	    }
-	    if (n != 0) {
-		this->LR *= (n & 1) ? SpinOp<FpType>::sigma_y((n-1)/2)
-		    : SpinOp<FpType>::sigma_z((n-1)/2);
-	    }
+	    this->LR = FermionOpNonBlockForm(N-2, n, false);
 	    this->RL = this->LR;
 	}
 	if (standard_gamma) {
 	    *this /= sqrt(2.0);
 	}
     }
-
-    int spin_chain_length() const { return N/2-1; }
-
-    using MatrixType = typename Impl::template SumOps<FpType>::MatrixType;
-    operator BlockAntiDiag<MatrixType>() const {
-	return this->get_matrix(spin_chain_length());
-    }
-
-    // Impl::SumOps doesn't define operator* with MatrixType (because
-    // it doesn't store the spin chain length) so we must define it here
-    template<template<typename> typename B>
-    requires BlockForm<B<MatrixType>>
-    auto operator*(const B<MatrixType> &psi) const {
-	return this->operator BlockAntiDiag<MatrixType>() * psi;
-    }
 };
 
 #ifdef REAPERS_USE_PARITY_BLOCKS
 template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
-using FermionOp = FermionBlockOp<FpType, Impl>;
+using FermionOp = FermionOpBlockForm<FpType, Impl>;
 #else
 template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
-using FermionOp = FermionNonBlockOp<FpType, Impl>;
+using FermionOp = FermionOpNonBlockForm<FpType, Impl>;
 #endif

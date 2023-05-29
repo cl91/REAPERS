@@ -164,11 +164,9 @@ template<RealScalar FpType>
 class BaseEval {
     virtual void pre_evolve(const SumOps<FpType> &ham, State<FpType> &s,
 			    FpType beta) = 0;
-    virtual void evolve(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
-			State<FpType> &s, FpType t, FpType beta,
-			const std::vector<FermionOp<FpType>> &ops) = 0;
-    virtual complex<FpType> evolve_trace(const SumOps<FpType> &hLL,
-					 const SumOps<FpType> &hRR,
+    virtual void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t,
+			FpType beta, const std::vector<FermionOp<FpType>> &ops) = 0;
+    virtual complex<FpType> evolve_trace(const HamOp<FpType> &ham,
 					 const MatrixType<FpType> expmbH, FpType t,
 					 const std::vector<FermionOp<FpType>> &ops) = 0;
 
@@ -216,9 +214,9 @@ public:
 	FpType dt = args.tmax / args.nsteps;
 	if (args.trace) {
 	    assert(!s0);
-	    auto expmbH = ham.LL.matexp({-args.beta,0}, args.N/2-1);
+	    auto expmbH = ham.LL.matexp(-args.beta);
 	    for (int i = 0; i <= args.nsteps; i++) {
-		v[i] = evolve_trace(ham.LL, ham.RR, expmbH, i*dt, syk.fermion_ops());
+		v[i] = evolve_trace(ham, expmbH, i*dt, syk.fermion_ops());
 		auto tm = time(nullptr);
 		logger << "Time step " << i*dt << " done. Time for this step: "
 		       << tm - current_time << "s"
@@ -243,7 +241,7 @@ public:
 		if (args.swap) {
 		    s0.reset();
 		}
-		evolve(ham.LL, ham.RR, s, i*dt, args.beta, syk.fermion_ops());
+		evolve(ham, s, i*dt, args.beta, syk.fermion_ops());
 		if (args.swap) {
 		    s.gc();
 		    s0 = std::make_unique<State<FpType>>(*hostst);
@@ -273,19 +271,16 @@ class Green : public BaseEval<FpType> {
         this->evolve_step(ham, s, 0, beta/2);
     }
 
-    void evolve(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
-		State<FpType> &s, FpType t, FpType beta,
+    void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t, FpType beta,
 		const std::vector<FermionOp<FpType>> &ops) {
-        this->evolve_step(hRR, s, t, 0);
-	this->evolve_step(hLL, s, -t, 0);
+        this->evolve_step(ham.RR, s, t, 0);
+	this->evolve_step(ham.LL, s, -t, 0);
     }
 
-    complex<FpType> evolve_trace(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
-				 const MatrixType<FpType> expmbH, FpType t,
-				 const std::vector<FermionOp<FpType>> &ops) {
-	auto len = this->args.N/2-1;
-	auto m0 = hRR.matexp({0, -t}, len);
-	auto m1 = hLL.matexp({0, t}, len);
+    complex<FpType> evolve_trace(const HamOp<FpType> &ham, const MatrixType<FpType> expmbH,
+				 FpType t, const std::vector<FermionOp<FpType>> &ops) {
+	auto m0 = ham.RR.matexp({0,-t});
+	auto m1 = ham.LL.matexp({0,t});
 	return (m1 * m0 * expmbH).trace();
     }
 
@@ -300,8 +295,7 @@ class OTOC : public BaseEval<FpType> {
         this->evolve_step(ham, s, 0, beta/8);
     }
 
-    void evolve(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
-		State<FpType> &s, FpType t, FpType beta,
+    void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t, FpType beta,
 		const std::vector<FermionOp<FpType>> &ops) {
 	auto N = this->args.N;
 	auto otoc_idx = this->args.otoc_idx;
@@ -310,26 +304,24 @@ class OTOC : public BaseEval<FpType> {
 	    op = ops[otoc_idx].LR;
 	}
 	s *= op;
-	this->evolve_step(hRR, s, t, beta/4);
-	this->evolve_step(hLL, s, -t, beta/4);
+	this->evolve_step(ham.RR, s, t, beta/4);
+	this->evolve_step(ham.LL, s, -t, beta/4);
 	s *= op;
-	this->evolve_step(hRR, s, t, beta/4);
-	this->evolve_step(hLL, s, -t, 0);
+	this->evolve_step(ham.RR, s, t, beta/4);
+	this->evolve_step(ham.LL, s, -t, 0);
     }
 
-    complex<FpType> evolve_trace(const SumOps<FpType> &hLL, const SumOps<FpType> &hRR,
-				 const MatrixType<FpType> expmbH, FpType t,
-				 const std::vector<FermionOp<FpType>> &ops) {
+    complex<FpType> evolve_trace(const HamOp<FpType> &ham, const MatrixType<FpType> expmbH,
+				 FpType t, const std::vector<FermionOp<FpType>> &ops) {
 	auto N = this->args.N;
 	auto otoc_idx = this->args.otoc_idx;
-	SumOps<FpType> op(ops[N-2].LR);
+	auto op(ops[N-2].LR);
 	if ((otoc_idx >= 0) && (otoc_idx <= (N-2))) {
 	    op = ops[otoc_idx].LR;
 	}
-	auto len = N/2-1;
-	auto m0 = hRR.matexp({0, -t}, len);
-	auto m1 = hLL.matexp({0, t}, len);
-	auto m2 = op.get_matrix(len);
+	auto m0 = ham.RR.matexp({0,-t});
+	auto m1 = ham.LL.matexp({0,t});
+	auto m2 = op.get_matrix();
 	return (m1 * m0 * m2 * m1 * m0 * m2 * expmbH).trace();
     }
 

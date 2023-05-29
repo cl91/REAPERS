@@ -261,3 +261,9 @@ public:
 	return ham;
     }
 };
+
+template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
+using SYKBlockForm = SYK<FpType, Impl, FermionOpBlockForm>;
+
+template<RealScalar FpType = DefFpType, typename Impl = DefImpl>
+using SYKNonBlockForm = SYK<FpType, Impl, FermionOpNonBlockForm>;

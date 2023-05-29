@@ -71,6 +71,12 @@ concept BlockDiagType = BareTypeSpecializes<B, BlockDiag>;
 // This class represents a block diagonal matrix
 //    B = ( bLL  0  )
 //        ( 0   bRR )
+// We define this as a struct so everything is exposed. In general
+// you should have no need to modify the members directly and can
+// simply use the overloaded arithmetic operators that act on both
+// blocks. However, if you do modify LL or RR you need to make sure
+// that nullLL and nullRR are modified accordingly. This applies to
+// the other block matrix forms as well.
 template<BareType T>
 struct BlockDiag {
     T LL, RR;
@@ -143,28 +149,31 @@ struct BlockDiag {
     // This member function would not be defined if T does not have a
     // T::get_matrix(int) member function (this is an example of SFINAE).
     // Likewise for matexp and BlockAntiDiag::get_matrix etc.
-    auto get_matrix(int len) const {
-	using Ty = _REAPERS_evaltype(LL.get_matrix(len));
-	BlockDiag<Ty> res(nullLL ? Ty{} : LL.get_matrix(len),
-			  nullRR ? Ty{} : RR.get_matrix(len));
+    template<typename...Args>
+    auto get_matrix(Args&&...args) const {
+	using Ty = _REAPERS_evaltype(LL.get_matrix(std::forward<Args>(args)...));
+	BlockDiag<Ty> res(nullLL ? Ty{} : LL.get_matrix(std::forward<Args>(args)...),
+			  nullRR ? Ty{} : RR.get_matrix(std::forward<Args>(args)...));
 	res.nullLL = nullLL;
 	res.nullRR = nullRR;
 	return res;
     }
 
-    template<RealScalar Fp>
-    auto matexp(complex<Fp> c, int len) const {
-	using Ty = _REAPERS_evaltype(LL.matexp(c,len));
-	BlockDiag<Ty> res(nullLL ? Ty{} : LL.matexp(c,len),
-			  nullRR ? Ty{} : RR.matexp(c,len));
+    template<typename...Args>
+    auto matexp(Args&&...args) const {
+	using Ty = _REAPERS_evaltype(LL.matexp(std::forward<Args>(args)...));
+	BlockDiag<Ty> res(nullLL ? Ty{} : LL.matexp(std::forward<Args>(args)...),
+			  nullRR ? Ty{} : RR.matexp(std::forward<Args>(args)...));
 	res.nullLL = nullLL;
 	res.nullRR = nullRR;
 	return res;
     }
 
-    auto trace() const {
-	using Ty = _REAPERS_evaltype(LL.trace());
-	return (nullLL ? Ty{} : LL.trace()) + (nullRR ? Ty{} : RR.trace());
+    template<typename...Args>
+    auto trace(Args&&...args) const {
+	using Ty = _REAPERS_evaltype(LL.trace(std::forward<Args>(args)...));
+	return (nullLL ? Ty{} : LL.trace(std::forward<Args>(args)...))
+	    + (nullRR ? Ty{} : RR.trace(std::forward<Args>(args)...));
     }
 };
 
@@ -239,10 +248,11 @@ struct BlockAntiDiag {
 	return *this;
     }
 
-    auto get_matrix(int len) const {
-	using Ty = _REAPERS_evaltype(LR.get_matrix(len));
-	BlockAntiDiag<Ty> res(nullLR ? Ty{} : LR.get_matrix(len),
-			      nullRL ? Ty{} : RL.get_matrix(len));
+    template<typename...Args>
+    auto get_matrix(Args&&...args) const {
+	using Ty = _REAPERS_evaltype(LR.get_matrix(std::forward<Args>(args)...));
+	BlockAntiDiag<Ty> res(nullLR ? Ty{} : LR.get_matrix(std::forward<Args>(args)...),
+			      nullRL ? Ty{} : RL.get_matrix(std::forward<Args>(args)...));
 	res.nullLR = nullLR;
 	res.nullRL = nullRL;
 	return res;
@@ -331,12 +341,13 @@ struct BlockOp : BlockDiag<T>, BlockAntiDiag<T> {
 	return *this;
     }
 
-    auto get_matrix(int len) const {
-	using Ty = _REAPERS_evaltype(this->LL.get_matrix(len));
-	BlockOp<Ty> res(this->nullLL ? Ty{} : this->LL.get_matrix(len),
-			this->nullLR ? Ty{} : this->LR.get_matrix(len),
-			this->nullRL ? Ty{} : this->RL.get_matrix(len),
-			this->nullRR ? Ty{} : this->RR.get_matrix(len));
+    template<typename...Args>
+    auto get_matrix(Args&&...args) const {
+	using Ty = _REAPERS_evaltype(this->LL.get_matrix(std::forward<Args>(args)...));
+	BlockOp<Ty> res(this->nullLL ? Ty{} : this->LL.get_matrix(std::forward<Args>(args)...),
+			this->nullLR ? Ty{} : this->LR.get_matrix(std::forward<Args>(args)...),
+			this->nullRL ? Ty{} : this->RL.get_matrix(std::forward<Args>(args)...),
+			this->nullRR ? Ty{} : this->RR.get_matrix(std::forward<Args>(args)...));
 	res.nullLL = this->nullLL;
 	res.nullLR = this->nullLR;
 	res.nullRL = this->nullRL;
@@ -344,7 +355,10 @@ struct BlockOp : BlockDiag<T>, BlockAntiDiag<T> {
 	return res;
     }
 
-    auto trace() const { return BlockDiag<T>::trace(); }
+    template<typename...Args>
+    auto trace(Args&&...args) const {
+	return BlockDiag<T>::trace(std::forward<Args>(args)...);
+    }
 };
 
 template<BareType T>

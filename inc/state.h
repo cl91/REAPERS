@@ -539,7 +539,9 @@ struct BlockState : BlockVec<State<FpType,Impl>> {
 
     // Construct the ground state of the given Hamiltonian. Each parity block
     // is computed separately and we normalize the result.
-    FpType ground_state(const BlockDiag<typename Impl::template SumOps<FpType>> &ham,
+    template<typename HamOpTy>
+    requires std::derived_from<HamOpTy, typename Impl::template SumOps<FpType>>
+    FpType ground_state(const BlockDiag<HamOpTy> &ham,
 			int krydim = 3, FpType eps = 100*epsilon<FpType>()) {
 	auto g0 = this->L.ground_state(ham.LL, krydim, eps);
 	auto g1 = this->R.ground_state(ham.RR, krydim, eps);
@@ -612,8 +614,10 @@ struct BlockState : BlockVec<State<FpType,Impl>> {
     // Evolve the state using the following formula
     //   |psi> = exp(-(it + beta)H) |psi>
     template<template<typename>typename Algo = DefEvolutionAlgorithm,
-	     RealScalar FpType1, RealScalar FpType2, typename...Args>
-    void evolve(const BlockDiag<typename Impl::template SumOps<FpType>> &ham,
+	     RealScalar FpType1, RealScalar FpType2, typename HamOpTy,
+	     typename...Args>
+    requires std::derived_from<HamOpTy, typename Impl::template SumOps<FpType>>
+    void evolve(const BlockDiag<HamOpTy> &ham,
 		FpType1 t, FpType2 beta = 0.0, Args&&...args) {
 	if ((t == 0.0) && (beta == 0.0)) {
 	    return;
