@@ -23,6 +23,70 @@ Revision History:
 #include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
 #endif
 
+// Cache for the matexp results. We implement a simple LRU (least recently
+// used) policy where we evict the least accessed result if we need to
+// make space.
+template<typename FpType, typename MatTy, typename Impl>
+class MatexpCache {
+    // The u64 is the number of times that the corresponding matexp result
+    // has been accessed.
+    std::map<std::tuple<FpType,FpType>,std::tuple<MatTy,u64>> cache;
+    size_t size;
+
+    // Find the least accessed matexp result and evict it.
+    void evict() {
+	auto it = cache.end();
+	u64 hit_count = ~0ULL;
+	for (auto i = cache.begin(); i != cache.end(); i++) {
+	    if (std::get<1>(i->second) < hit_count) {
+		it = i;
+	    }
+	}
+	if (it != cache.end()) {
+	    size -= sizeof(complex<FpType>) * std::get<0>(it->second).size();
+	    cache.erase(it);
+	}
+    }
+
+public:
+    using ImplTy = Impl;
+
+    MatexpCache() : size{} {}
+    // We cannot copy the matexp cache (well we could, but since copying
+    // may fill the cache space we'd have to throw an exception during
+    // copy in that case, which is problematic as it prevents the SumOps
+    // class from being successfully copied).
+    MatexpCache(const MatexpCache &) = delete;
+    MatexpCache &operator=(const MatexpCache &) = delete;
+    // Moving the cache is fine though.
+    MatexpCache(MatexpCache &&) = default;
+    MatexpCache &operator=(MatexpCache &&) = default;
+
+    std::tuple<bool, const MatTy &> find(complex<FpType> c) {
+	auto it = cache.find({c.real(), c.imag()});
+	if (it != cache.end()) {
+	    ++std::get<1>(it->second);
+	    return {true, std::get<0>(it->second)};
+	}
+	return {false, {}};
+    }
+
+    const MatTy &insert(complex<FpType> c, MatTy &&res) {
+	// You can only call this function if there is no matrix
+	// indexed by c in the cache.
+	assert(!std::get<0>(find(c)));
+	size_t sz = sizeof(complex<FpType>) * res.size();
+	size += sz;
+	if (!Impl::cache_reserve(sz)) { evict(); }
+	std::tuple<FpType,FpType> key = {c.real(), c.imag()};
+	auto it = cache.emplace(key, std::tuple{res,0});
+	assert(std::get<1>(it));
+	return std::get<0>(std::get<0>(it)->second);
+    }
+
+    void clear() { cache.clear(); Impl::cache_release(size); size = 0; }
+};
+
 // Forward declaration
 class CPUImpl;
 
@@ -47,69 +111,11 @@ public:
     using ComplexScalarType = complex<FpType>;
 
 protected:
-    // Cache for the matexp results. We implement a simple LRU (least recently
-    // used) policy where we evict the least accessed result if we need to
-    // make space.
-    template<typename MatTy, typename Impl>
-    class MatexpCache {
-	// The u64 is the number of times that the corresponding matexp result
-	// has been accessed.
-	std::map<std::tuple<FpType,FpType>,std::tuple<MatTy,u64>> cache;
-	size_t size;
-	// Find the least accessed matexp result and evict it.
-	void evict() {
-	    auto it = cache.end();
-	    u64 hit_count = ~0ULL;
-	    for (auto i = cache.begin(); i != cache.end(); i++) {
-		if (std::get<1>(i->second) < hit_count) {
-		    it = i;
-		}
-	    }
-	    if (it != cache.end()) {
-		size -= sizeof(complex<FpType>) * std::get<0>(it->second).size();
-		cache.erase(it);
-	    }
-	}
-    public:
-	using ImplTy = Impl;
-	MatexpCache() : size{} {}
-	// We cannot copy the matexp cache (well we could, but since copying
-	// may fill the cache space we'd have to throw an exception during
-	// copy in that case, which is problematic as it prevents the SumOps
-	// class from being successfully copied).
-	MatexpCache(const MatexpCache &) = delete;
-	MatexpCache &operator=(const MatexpCache &) = delete;
-	// Moving the cache is fine though.
-	MatexpCache(MatexpCache &&) = default;
-	MatexpCache &operator=(MatexpCache &&) = default;
-	std::tuple<bool, const MatTy &> find(complex<FpType> c) {
-	    auto it = cache.find({c.real(), c.imag()});
-	    if (it != cache.end()) {
-		++std::get<1>(it->second);
-		return {true, std::get<0>(it->second)};
-	    }
-	    return {false, {}};
-	}
-	const MatTy &insert(complex<FpType> c, MatTy &&res) {
-	    // You can only call this function if there is no matrix
-	    // indexed by c in the cache.
-	    assert(!std::get<0>(find(c)));
-	    size_t sz = sizeof(complex<FpType>) * res.size();
-	    size += sz;
-	    if (!Impl::cache_reserve(sz)) { evict(); }
-	    std::tuple<FpType,FpType> key = {c.real(), c.imag()};
-	    auto it = cache.emplace(key, std::tuple{res,0});
-	    assert(std::get<1>(it));
-	    return std::get<0>(std::get<0>(it)->second);
-	}
-	void clear() { cache.clear(); Impl::cache_release(size); size = 0; }
-    };
-
     std::vector<SpinOp<FpType>> ops;
     mutable MatrixType mat;
     mutable EigenVals eigenvals;
     mutable EigenVecs eigenvecs;
-    mutable MatexpCache<MatrixType,CPUImpl> matexp_cache;
+    mutable MatexpCache<FpType,MatrixType,CPUImpl> matexp_cache;
 
     // Release the mutable internal state used for caching the results of the
     // get_matrix() and related functions. Note that any derived class MUST

@@ -304,7 +304,7 @@ private:
     mutable FpType *dev_eigenvals;
     mutable std::unique_ptr<EigenVecs> eigenvecs;
     // Note this hides the matexp_cache member of the parent class.
-    mutable HostSumOps<FpType>::template MatexpCache<MatrixType,GPUImpl> matexp_cache;
+    mutable MatexpCache<FpType,MatrixType,GPUImpl> matexp_cache;
 
     // Upload the host summed operators to the device. If the number of operators
     // is less than 2^len, then simply copy the operators to the device side.
@@ -418,8 +418,6 @@ public:
 class GPUImpl {
     template<RealScalar FpType>
     friend class DevSumOps;
-    template<RealScalar FpType>
-    friend class DevSumOps<FpType>::MatrixType;
 
     // This class represents a vector in device memory. Note the end user
     // is not supposed to access this object directly (they should access
