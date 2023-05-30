@@ -31,10 +31,7 @@ namespace EvolutionAlgorithm {
 #include "algo.h"
 }
 
-#ifdef REAPERS_USE_MATRIX_POWER
-template<typename Impl>
-using DefEvolutionAlgorithm = EvolutionAlgorithm::MatrixPower<Impl>;
-#elif defined(REAPERS_USE_EXACT_DIAGONALIZATION)
+#ifdef REAPERS_USE_EXACT_DIAGONALIZATION
 template<typename Impl>
 using DefEvolutionAlgorithm = EvolutionAlgorithm::ExactDiagonalization<Impl>;
 #else
@@ -199,7 +196,7 @@ public:
     // energy is returned. You can optionally specify the Krylov dimension
     // and the tolerance used in the algorithm.
     FpType ground_state(const typename Impl::template SumOps<FpType> &ham,
-			int krydim = 3, FpType eps = 100*epsilon<FpType>()) {
+			int krydim = 5, FpType eps = epsilon<FpType>()) {
 	assert(len != 0);
 	if (!len) return {};
 	assert(krydim > 1);

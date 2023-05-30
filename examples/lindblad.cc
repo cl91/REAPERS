@@ -189,7 +189,7 @@ class Eval : protected ArgParser {
 	if (!trace) {
 	    init = std::make_unique<BlockState<FpType>>(len);
 	    if (gndst) {
-		auto gs_energy = init->ground_state(ham);
+		auto gs_energy = init->ground_state(ham, krylov_dim);
 		if (verbose) {
 		    std::cout << "Ground state energy " << gs_energy << std::endl;
 		}

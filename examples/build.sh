@@ -38,7 +38,7 @@ for i in $PROJS; do
     if (( $GPU )); then
 	$NVCC -DGITHASH="\"$GITHASH\"" $i.cc  -o $i-gpu
     elif (( $GPU_ICPX )); then
-	$ICXX_BUILD -DGITHASH="\"$GITHASH\"" $i.cc  -c -o /tmp/$i-icpx.o
+	$ICXX_BUILD -DGITHASH="\"$GITHASH\"" $i.cc  -c -o /tmp/$i-icpx.o &&
 	$NVCC $NVCC_ICXX_OPTS /tmp/$i-icpx.o  -o $i-gpu-icpx
     elif (( $INTEL )); then
 	$ICXX -DGITHASH="\"$GITHASH\"" $i.cc  -o $i-intel
