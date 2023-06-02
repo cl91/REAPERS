@@ -22,6 +22,7 @@ Revision History:
 --*/
 
 #include <ctime>
+#include <iomanip>
 
 #ifdef MAX_NUM_FERMIONS
 #define REAPERS_SPIN_SITES	(MAX_NUM_FERMIONS/2 - 1)
@@ -29,7 +30,7 @@ Revision History:
 
 #define REAPERS_USE_PARITY_BLOCKS
 #include <reapers.h>
-#include "argparser.h"
+#include "common.h"
 
 using namespace REAPERS;
 using namespace REAPERS::Model;
@@ -67,7 +68,17 @@ class Eval : protected ArgParser {
 
     bool optcheck_hook() {
 	if (t0 > tmax) {
-	    std::cout << "Starting time cannot be greater than maximum time"
+	    std::cout << "Starting time cannot be greater than maximum time."
+		      << std::endl;
+	    return false;
+	}
+	if (trace && gndst) {
+	    std::cout << "You cannot specify both --trace and --ground-state."
+		      << std::endl;
+	    return false;
+	}
+	if (trace && use_krylov) {
+	    std::cout << "You cannot specify both --trace and --use-krylov."
 		      << std::endl;
 	    return false;
 	}
@@ -178,10 +189,16 @@ class Eval : protected ArgParser {
 	return norm(psi * init);
     }
 
+    double get_entropy(double purity) {
+	return -std::log(purity)/N;
+    }
+
     // Simulate one disorder realization, using the trace definition.
     template<RealScalar FpType, typename RandGen>
     void runone(const SYK<FpType> &syk, RandGen &rg, std::ofstream &outf,
-		const std::vector<FpType> &tarray, std::vector<double> &entropy) {
+		Logger &logger, const std::vector<FpType> &tarray,
+		std::vector<double> &purity_avg) {
+	auto start_time = time(nullptr);
 	// Spin chain length
 	int len = N/2-1;
 	auto ham = syk.gen_ham(rg);
@@ -190,9 +207,9 @@ class Eval : protected ArgParser {
 	    init = std::make_unique<BlockState<FpType>>(len);
 	    if (gndst) {
 		auto gs_energy = init->ground_state(ham, krylov_dim);
-		if (verbose) {
-		    std::cout << "Ground state energy " << gs_energy << std::endl;
-		}
+		logger << "Ground state energy " << gs_energy
+		       << " . Time elapsed: " << time(nullptr) - start_time
+		       << "s." << endl;
 		init->gc();
 	    } else {
 		init->random_state();
@@ -200,9 +217,7 @@ class Eval : protected ArgParser {
 	}
 	for (size_t u = 0; u < tarray.size(); u++) {
 	    auto T = tarray[u];
-	    if (verbose) {
-		std::cout << "Computing time point " << T << std::endl;
-	    }
+	    logger << "Computing time point " << T << endl;
 	    double purity = 0.0;
 	    // Compute m quantum trajectories
 	    for (int i = 0; i < m; i++) {
@@ -216,19 +231,18 @@ class Eval : protected ArgParser {
 		} else {
 		    overlap = compute_purity(syk, ham, fwd_traj, bac_traj, *init);
 		}
-		if (verbose && !(i % 128)) {
-		    std::cout << "Traj " << i << " done." << std::endl;
+		if (!(i % 128)) {
+		    logger << "Traj " << i << " done. Time elapsed: "
+			   << time(nullptr) - start_time << "s." << endl;
 		}
 		outf << T << " " << overlap << std::endl;
 		purity += overlap;
 	    }
 	    // Compute the entanglement entropy
-	    purity /= m;
-	    entropy[u] = -std::log(purity)/N;
-	    if (verbose) {
-		std::cout << "T = " << T << ", entropy = " << entropy[u]
-			  << std::endl;
-	    }
+	    purity_avg[u] = purity /= m;
+	    logger << "T = " << T << ", entropy = " << get_entropy(purity)
+		   << ". Time elapsed: " << time(nullptr) - start_time
+		   << "s." << endl;
 	}
     }
 
@@ -252,15 +266,34 @@ class Eval : protected ArgParser {
 		ss << "ed";
 	    }
 	}
+	constexpr auto max_precision{std::numeric_limits<FpType>::digits10 + 1};
 	std::ofstream outf;
 	outf.rdbuf()->pubsetbuf(0, 0);
 	outf.open(ss.str());
+	outf << std::setprecision(max_precision);
 	std::ofstream entf;
 	entf.rdbuf()->pubsetbuf(0, 0);
 	entf.open(std::string("Ent") + ss.str());
+	entf << std::setprecision(max_precision);
 	std::ofstream avgf;
 	avgf.rdbuf()->pubsetbuf(0, 0);
 	avgf.open(std::string("Avg") + ss.str());
+	avgf << std::setprecision(max_precision);
+	std::ofstream logf;
+	logf.rdbuf()->pubsetbuf(0, 0);
+	logf.open(std::string("Log") + ss.str());
+	Logger logger(verbose, logf);
+	logger << "Running Lindblad calculation using build "
+	       << GITHASH << ".\nParameters are: N " << N
+	       << " M " << M << " k " << sparsity
+	       << " tmax " << tmax << " nsteps " << nsteps
+	       << " m " << m << " dt " << dt << " mu " << mu
+	       << (trace ? " trace" : "")
+	       << (gndst ? " ground state" : "")
+	       << (!(trace || gndst) ? " random state" : "") << endl;
+	if (use_krylov) {
+	    logger << " krylov dim" << krylov_dim;
+	}
 
 	std::random_device rd;
 	std::mt19937 rg(rd());
@@ -278,17 +311,22 @@ class Eval : protected ArgParser {
 	    }
 	}
 	std::vector<double> entropy_sum(tarray.size());
+	std::vector<double> purity_sum(tarray.size());
 	for (int i = 0; i < M; i++) {
-	    std::vector<double> entropy(tarray.size());
-	    runone(syk, rg, outf, tarray, entropy);
+	    std::vector<double> purity(tarray.size());
+	    logger << "Computing disorder " << i << endl;
+	    runone(syk, rg, outf, logger, tarray, purity);
 	    for (size_t j = 0; j < tarray.size(); j++) {
-		entf << tarray[j] << " " << entropy[j] << std::endl;
-		entropy_sum[j] += entropy[j];
+		entf << tarray[j] << " " << get_entropy(purity[j]) << std::endl;
+		entropy_sum[j] += get_entropy(purity[j]);
+		purity_sum[j] += purity[j];
 	    }
 	}
 	for (size_t i = 0; i < tarray.size(); i++) {
 	    entropy_sum[i] /= M;
-	    avgf << tarray[i] << " " << entropy_sum[i] << std::endl;
+	    purity_sum[i] /= M;
+	    avgf << tarray[i] << " " << entropy_sum[i] << " "
+		 << get_entropy(purity_sum[i]) << std::endl;
 	}
     }
 

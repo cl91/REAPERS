@@ -8,8 +8,8 @@ Module Name:
 
 Abstract:
 
-    This module file contains the command line parsing code common to the
-    example programs in this directory.
+    This module file contains the helper classes common to the example
+    programs in this directory.
 
 Revision History:
 
@@ -163,3 +163,39 @@ public:
 	return optcheck_hook();
     }
 };
+
+// Helper class for logging
+class Logger {
+    bool verbose;
+    std::ofstream &logf;
+
+public:
+    Logger(bool verbose, std::ofstream &logf) : verbose(verbose), logf(logf) {}
+
+    // Overload the << operator so we can write logs using *this << obj
+    template<typename T>
+    Logger &operator<<(T &&c) {
+	logf << c;
+	if (verbose) {
+	    std::cout << c;
+	}
+	return *this;
+    }
+
+    // We can also just say *this << "\n" (because we have disabled IO buffering
+    // for log files), but we want to be fancy.
+    friend Logger &endl(Logger &ev);
+
+    // This is the magic that makes *this << endl work.
+    Logger &operator<<(Logger &(*f)(Logger &)) {
+	return f(*this);
+    }
+};
+
+inline Logger &endl(Logger &ev) {
+    ev.logf << std::endl;
+    if (ev.verbose) {
+	std::cout << std::endl;
+    }
+    return ev;
+}

@@ -26,7 +26,7 @@ Revision History:
 
 #define REAPERS_USE_PARITY_BLOCKS
 #include <reapers.h>
-#include "argparser.h"
+#include "common.h"
 
 using namespace REAPERS;
 using namespace REAPERS::Model;
@@ -121,42 +121,6 @@ private:
 	return true;
     }
 };
-
-// Helper class for logging
-class Logger {
-    bool verbose;
-    std::ofstream &logf;
-
-public:
-    Logger(bool verbose, std::ofstream &logf) : verbose(verbose), logf(logf) {}
-
-    // Overload the << operator so we can write logs using *this << obj
-    template<typename T>
-    Logger &operator<<(T &&c) {
-	logf << c;
-	if (verbose) {
-	    std::cout << c;
-	}
-	return *this;
-    }
-
-    // We can also just say *this << "\n" (because we have disabled IO buffering
-    // for log files), but we want to be fancy.
-    friend Logger &endl(Logger &ev);
-
-    // This is the magic that makes *this << endl work.
-    Logger &operator<<(Logger &(*f)(Logger &)) {
-	return f(*this);
-    }
-};
-
-inline Logger &endl(Logger &ev) {
-    ev.logf << std::endl;
-    if (ev.verbose) {
-	std::cout << std::endl;
-    }
-    return ev;
-}
 
 // Base evaluator class for n-point functions which computes a single disorder
 // realization.
