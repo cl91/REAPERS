@@ -10,6 +10,7 @@ lindblad
 *-debug
 *-gpu
 *-intel
+*-gpu-icpx
 Log*
 Avg*
 Ent*

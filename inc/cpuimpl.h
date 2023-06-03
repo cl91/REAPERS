@@ -618,6 +618,16 @@ public:
 	}
     }
 
+    // Copy the n-th column vector of the given column major matrix into
+    // the buffer res.
+    template<RealScalar FpType>
+    static void copy_vec(VecSizeType<FpType> size, BufType<FpType> res,
+			 const typename HostSumOps<FpType>::MatrixType &mat,
+			 ssize_t rowidx) {
+	memcpy(res, mat.data() + rowidx*size, sizeof(complex<FpType>)*size);
+    }
+
+
     // Compute v0 += v1. v0 and v1 are assumed to point to different buffers.
     template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> v0,

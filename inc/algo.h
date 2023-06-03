@@ -31,6 +31,19 @@ class ExactDiagonalization {
     using SumOps = typename Impl::template SumOps<FpType>;
 public:
     template<RealScalar FpType>
+    static FpType ground_state(State<FpType,Impl> &s, const SumOps<FpType> &ham) {
+	auto len = s.spin_chain_length();
+	auto dim = s.dim();
+	auto &&eigensys = ham.get_eigensystem(len);
+	ssize_t rowidx, colidx;
+	FpType gs_energy = std::get<0>(eigensys).minCoeff(&rowidx, &colidx);
+	assert(colidx == 0);
+	assert(rowidx >= 0);
+	Impl::copy_vec(dim, s.buf(), std::get<1>(eigensys), rowidx);
+	return gs_energy;
+    }
+
+    template<RealScalar FpType>
     static void evolve(State<FpType, Impl> &s, const SumOps<FpType> &ops,
 		       FpType t, FpType beta = 0.0) {
 	s.enlarge(2);
@@ -45,22 +58,26 @@ template<typename Impl>
 class Krylov {
     template<RealScalar FpType>
     using SumOps = typename Impl::template SumOps<FpType>;
+
     // Low dimensional complex matrices that are stored and computed on the host
     template<RealScalar FpType>
-    using SmallMat = Eigen::Matrix<std::complex<FpType>, Eigen::Dynamic, Eigen::Dynamic>;
-
+    using SmallCMat = Eigen::Matrix<std::complex<FpType>, Eigen::Dynamic, Eigen::Dynamic>;
     template<RealScalar FpType>
-    using SmallVec = Eigen::Matrix<std::complex<FpType>, Eigen::Dynamic, 1>;
+    using SmallCVec = Eigen::Matrix<std::complex<FpType>, Eigen::Dynamic, 1>;
+    template<RealScalar FpType>
+    using SmallRMat = Eigen::Matrix<FpType, Eigen::Dynamic, Eigen::Dynamic>;
+    template<RealScalar FpType>
+    using SmallRVec = Eigen::Matrix<FpType, Eigen::Dynamic, 1>;
 
     // Orthogonalize buf(j+1) against buf(0) through buf(j) using the iterative
     // (classical) Gram-Schmidt algorithm. Returns false if orthogonalization has failed.
     // The orthogonalization coefficients will written to the H matrix, unless j is
     // equal to (m-1). The norm of the final vector is written to beta.
     template<RealScalar FpType>
-    static bool orthogonalize(State<FpType, Impl> &s, SmallMat<FpType> &H, int j, int m,
+    static bool orthogonalize(State<FpType, Impl> &s, SmallCMat<FpType> &H, int j, int m,
 			      FpType &beta, FpType eta = 1/sqrt(2), int max_iters = 3) {
 	auto dim = s.dim();
-	SmallVec<FpType> r(j+1), h(j+1);
+	SmallCVec<FpType> r(j+1), h(j+1);
 	r.setZero();
 	h.setZero();
 	FpType old_norm{1.0}, norm{eta/2};
@@ -126,7 +143,7 @@ class Krylov {
     //   current buffer index points to the normalized initial vector.
     template<RealScalar FpType>
     static bool arnoldi(State<FpType,Impl> &s, const SumOps<FpType> &A,
-			SmallMat<FpType> &H, int k, int &m, FpType &beta) {
+			SmallCMat<FpType> &H, int k, int &m, FpType &beta) {
 	assert(k >= 0);
 	assert(m >= (k+1));
 	auto dim = s.dim();
@@ -156,6 +173,89 @@ class Krylov {
     }
 
 public:
+    // Compute the ground state of the given Hamiltonian, using the Lanczos
+    // algorithm. When finished, the state is set the ground state and the
+    // energy is returned. You can optionally specify the Krylov dimension
+    // and the tolerance used in the algorithm.
+    template<RealScalar FpType>
+    static FpType ground_state(State<FpType,Impl> &s, const SumOps<FpType> &ham,
+			       int krydim = 5, FpType eps = 10*epsilon<FpType>(),
+			       int maxiter = 0) {
+	auto dim = s.dim();
+	auto len = s.spin_chain_length();
+	assert(len != 0);
+	if (!len) return {};
+	assert(krydim > 1);
+	// We need krydim internal buffers for the krydim Krylov vectors, ie.
+	// v[0] = buf(0), v[1] = buf(1), ..., v[krydim-1] = buf(krydim-1).
+	// When one Lanczos iteration finishes, we compute the ground state and
+	// increment the internal buffer pointer to point to the ground state.
+	s.enlarge(krydim+1);
+	std::vector<FpType> alpha(krydim); // Lanczos diagonal entries
+	std::vector<FpType> beta(krydim-1); // Lanczos off-diagonal entries
+	// Initialize the state to a Haar random state
+	s.random_state();
+	int numiter = 0;
+
+    iter:
+	// Do the Lanczos procedure to generate the Krylov subspace
+	// Although we only need to generate (krydim-1) Krylov vectors,
+	// we do an additional iteration to compute alpha[i].
+	for (int i = 0; i < krydim; i++) {
+	    // Each iteration will compute the next Krylov vector v[i+1]
+	    // and the current Krylov coefficients, alpha[i] and beta[i].
+	    // We start from a zero vector v[i+1]
+	    Impl::zero_vec(dim, s.buf(i+1));
+	    // v[i+1] = H * v[i]
+	    Impl::apply_ops(len, s.buf(i+1), ham, s.buf(i));
+	    // alpha[i] = <v[i]|v[i+1]> = <v[i]|H|v[i]>.
+	    // For Hermitian H this is always real.
+	    alpha[i] = Impl::vec_prod(dim, s.buf(i), s.buf(i+1)).real();
+	    // For the last iteration we only need alpha[i]
+	    if (i == (krydim - 1)) {
+		break;
+	    }
+	    // v[i+1] -= alpha[i] * v[i]
+	    Impl::add_vec(dim, s.buf(i+1), -alpha[i], s.buf(i));
+	    if (i != 0) {
+		// v[i+1] -= beta[i-1] * v[i-1]
+		Impl::add_vec(dim, s.buf(i+1), -beta[i-1], s.buf(i-1));
+	    }
+	    // beta[i] = sqrt(<v[i+1]|v[i+1]>)
+	    beta[i] = Impl::vec_norm(dim, s.buf(i+1));
+	    // v[i+1] /= beta[i]
+	    Impl::scale_vec(dim, s.buf(i+1), 1/beta[i]);
+	}
+
+	// Compute the ground state by diagonalizing in Krylov subspace
+	Eigen::SelfAdjointEigenSolver<SmallRMat<FpType>> solver;
+	SmallRVec<FpType> a = Eigen::Map<SmallRVec<FpType>>(alpha.data(),
+							    krydim, 1);
+	SmallRVec<FpType> b = Eigen::Map<SmallRVec<FpType>>(beta.data(),
+							    krydim-1, 1);
+	solver.computeFromTridiagonal(a, b, Eigen::ComputeEigenvectors);
+	int idx;
+	auto energy = solver.eigenvalues().minCoeff(&idx);
+	auto vec = solver.eigenvectors().col(idx);
+
+	// Compute the ground state.
+	Impl::zero_vec(dim, s.buf(krydim));
+	for (int i = 0; i < krydim; i++) {
+	    Impl::add_vec(dim, s.buf(krydim), vec[i], s.buf(i));
+	}
+	// Increment the internal buffer pointer to point to the ground state.
+	s.inc_curbuf(krydim);
+	s.normalize();
+	numiter++;
+
+	// If tolerance is not reached, repeat the procedure but this time
+	// start from the ground state that we just computed.
+	if (beta[0] > eps && (!maxiter || numiter < maxiter)) {
+	    goto iter;
+	}
+	return energy;
+    }
+
     // Compute s = exp(-(beta+it)H) * s using the restarted Krylov subspace method.
     //
     // See "A Restarted Krylov Subspace Method for the Evaluation of Matrix Functions",
@@ -164,8 +264,8 @@ public:
     //
     // This is the exact same algorithm implemented by slepc that dynamite calls.
     template<RealScalar FpType>
-    static void evolve(State<FpType,Impl> &s, const SumOps<FpType> &ops, FpType t_real,
-		       FpType t_imag = 0.0, int krydim = 5,
+    static void evolve(State<FpType,Impl> &s, const SumOps<FpType> &ops,
+		       FpType t_real, FpType t_imag = 0.0, int krydim = 5,
 		       FpType tol = epsilon<FpType>(), int max_iters = 0) {
 	assert(krydim >= 2);
 	auto dim = s.dim();
@@ -182,7 +282,7 @@ public:
 	// Full upper Hessenberg matrix constructed from the iterations below. At the
 	// end of each iterations its dimension is (niters*krydim) by (niters*krydim),
 	// unless the Arnoldi procedure breaks down prematurely.
-	SmallMat<FpType> Hfull(krydim, krydim);
+	SmallCMat<FpType> Hfull(krydim, krydim);
 	// Number of iterations
 	int niters = 0;
 	// Beta from the previous loop
@@ -193,7 +293,7 @@ public:
 	    // Compute the Arnoldi factorization
 	    int m = krydim;
 	    FpType beta;
-	    SmallMat<FpType> H(m, m);
+	    SmallCMat<FpType> H(m, m);
 	    H.setZero();
 	    bool brokedown = !arnoldi(s, ops, H, 0, m, beta);
 
@@ -228,12 +328,12 @@ public:
 	    }
 
 	    // Evaluate Hexp = exp(-(t_imag+it_real)Hfull).
-	    SmallMat<FpType> tHfull = std::complex{-t_imag,-t_real} * Hfull;
-	    SmallMat<FpType> Hexp = tHfull.exp();
+	    SmallCMat<FpType> tHfull = std::complex{-t_imag,-t_real} * Hfull;
+	    SmallCMat<FpType> Hexp = tHfull.exp();
 
 	    // The update will be built from the last m elements of
 	    // the zeroth column of Hexp
-	    SmallVec<FpType> Hexp0(m);
+	    SmallCVec<FpType> Hexp0(m);
 	    for (int i = 0; i < m; i++) {
 		Hexp0(i) = Hexp.col(0)((niters-1)*krydim+i);
 	    }

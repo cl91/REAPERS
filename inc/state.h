@@ -191,83 +191,6 @@ public:
 	}
     }
 
-    // Compute the ground state of the given Hamiltonian, using the Lanczos
-    // algorithm. When finished, the state is set the ground state and the
-    // energy is returned. You can optionally specify the Krylov dimension
-    // and the tolerance used in the algorithm.
-    FpType ground_state(const typename Impl::template SumOps<FpType> &ham,
-			int krydim = 5, FpType eps = epsilon<FpType>()) {
-	assert(len != 0);
-	if (!len) return {};
-	assert(krydim > 1);
-	// We need krydim internal buffers for the krydim Krylov vectors, ie.
-	// v[0] = buf(0), v[1] = buf(1), ..., v[krydim-1] = buf(krydim-1).
-	// When one Lanczos iteration finishes, we compute the ground state and
-	// increment the internal buffer pointer to point to the ground state.
-	enlarge(krydim+1);
-	std::vector<FpType> alpha(krydim); // Lanczos diagonal entries
-	std::vector<FpType> beta(krydim-1); // Lanczos off-diagonal entries
-	// Initialize the state to a Haar random state
-	random_state();
-
-    iter:
-	// Do the Lanczos procedure to generate the Krylov subspace
-	// Although we only need to generate (krydim-1) Krylov vectors,
-	// we do an additional iteration to compute alpha[i].
-	for (int i = 0; i < krydim; i++) {
-	    // Each iteration will compute the next Krylov vector v[i+1]
-	    // and the current Krylov coefficients, alpha[i] and beta[i].
-	    // We start from a zero vector v[i+1]
-	    Impl::zero_vec(dim(), buf(i+1));
-	    // v[i+1] = H * v[i]
-	    Impl::apply_ops(len, buf(i+1), ham, buf(i));
-	    // alpha[i] = <v[i]|v[i+1]> = <v[i]|H|v[i]>.
-	    // For Hermitian H this is always real.
-	    alpha[i] = Impl::vec_prod(dim(), buf(i), buf(i+1)).real();
-	    // For the last iteration we only need alpha[i]
-	    if (i == (krydim - 1)) {
-		break;
-	    }
-	    // v[i+1] -= alpha[i] * v[i]
-	    Impl::add_vec(dim(), buf(i+1), -alpha[i], buf(i));
-	    if (i != 0) {
-		// v[i+1] -= beta[i-1] * v[i-1]
-		Impl::add_vec(dim(), buf(i+1), -beta[i-1], buf(i-1));
-	    }
-	    // beta[i] = sqrt(<v[i+1]|v[i+1]>)
-	    beta[i] = Impl::vec_norm(dim(), buf(i+1));
-	    // v[i+1] /= beta[i]
-	    Impl::scale_vec(dim(), buf(i+1), 1/beta[i]);
-	}
-
-	// Compute the ground state by diagonalizing in Krylov subspace
-	using SmallMat = Eigen::Matrix<FpType, Eigen::Dynamic, Eigen::Dynamic>;
-	using SmallVec = Eigen::Matrix<FpType, Eigen::Dynamic, 1>;
-	Eigen::SelfAdjointEigenSolver<SmallMat> solver;
-	SmallVec a = Eigen::Map<SmallVec>(alpha.data(), krydim, 1);
-	SmallVec b = Eigen::Map<SmallVec>(beta.data(), krydim-1, 1);
-	solver.computeFromTridiagonal(a, b, Eigen::ComputeEigenvectors);
-	int idx;
-	auto energy = solver.eigenvalues().minCoeff(&idx);
-	auto vec = solver.eigenvectors().col(idx);
-
-	// Compute the ground state.
-	Impl::zero_vec(dim(), buf(krydim));
-	for (int i = 0; i < krydim; i++) {
-	    Impl::add_vec(dim(), buf(krydim), vec[i], buf(i));
-	}
-	// Increment the internal buffer pointer to point to the ground state.
-	inc_curbuf(krydim);
-	normalize();
-
-	// If tolerance is not reached, repeat the procedure but this time
-	// start from the ground state that we just computed.
-	if (beta[0] > eps) {
-	    goto iter;
-	}
-	return energy;
-    }
-
     auto operator[](IndexType i) const { assert(len); return buf()[i]; }
     auto operator[](IndexType i) { assert(len); return buf()[i]; }
 
@@ -468,6 +391,17 @@ public:
 	return os;
     }
 
+    // Compute the ground state of the given Hamiltonian, using the specified
+    // algorithm
+    template<template<typename>typename Algo = DefEvolutionAlgorithm,
+	     typename...Args>
+    FpType ground_state(const typename Impl::template SumOps<FpType> &ham,
+			Args&&...args) {
+	assert(len != 0);
+	if (!len) return {};
+	return Algo<Impl>::ground_state(*this, ham, std::forward<Args>(args)...);
+    }
+
     // Evolve the state using the following
     //   |psi> = exp(-(it + beta)H) |psi>
     template<template<typename>typename Algo = DefEvolutionAlgorithm,
@@ -536,12 +470,12 @@ struct BlockState : BlockVec<State<FpType,Impl>> {
 
     // Construct the ground state of the given Hamiltonian. Each parity block
     // is computed separately and we normalize the result.
-    template<typename HamOpTy>
+    template<template<typename>typename Algo = DefEvolutionAlgorithm,
+	     typename HamOpTy, typename...Args>
     requires std::derived_from<HamOpTy, typename Impl::template SumOps<FpType>>
-    FpType ground_state(const BlockDiag<HamOpTy> &ham,
-			int krydim = 3, FpType eps = 100*epsilon<FpType>()) {
-	auto g0 = this->L.ground_state(ham.LL, krydim, eps);
-	auto g1 = this->R.ground_state(ham.RR, krydim, eps);
+    FpType ground_state(const BlockDiag<HamOpTy> &ham, Args&&...args) {
+	auto g0 = this->L.template ground_state<Algo>(ham.LL, args...);
+	auto g1 = this->R.template ground_state<Algo>(ham.RR, args...);
 	if (g0 <= g1) {
 	    this->R = {};
 	    this->nullR = true;

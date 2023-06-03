@@ -34,6 +34,7 @@ Revision History:
 
 using namespace REAPERS;
 using namespace REAPERS::Model;
+using namespace REAPERS::EvolutionAlgorithm;
 template<RealScalar FpType>
 using MatrixType = typename SumOps<FpType>::MatrixType;
 template<RealScalar FpType>
@@ -88,9 +89,9 @@ class Eval : protected ArgParser {
     template<RealScalar FpType>
     void evolve(BlockState<FpType> &psi, const HamOp<FpType> &ham, float t) {
 	if (use_krylov) {
-	    psi.template evolve<EvolutionAlgorithm::Krylov>(ham, t, 0.0, krylov_dim);
+	    psi.template evolve<Krylov>(ham, t, 0.0, krylov_dim);
 	} else {
-	    psi.template evolve<EvolutionAlgorithm::ExactDiagonalization>(ham, t, 0.0);
+	    psi.template evolve<ExactDiagonalization>(ham, t, 0.0);
 	}
     }
 
@@ -206,7 +207,12 @@ class Eval : protected ArgParser {
 	if (!trace) {
 	    init = std::make_unique<BlockState<FpType>>(len);
 	    if (gndst) {
-		auto gs_energy = init->ground_state(ham, krylov_dim);
+		FpType gs_energy;
+		if (use_krylov) {
+		    gs_energy = init->template ground_state<Krylov>(ham, krylov_dim);
+		} else {
+		    gs_energy = init->template ground_state<ExactDiagonalization>(ham);
+		}
 		logger << "Ground state energy " << gs_energy
 		       << " . Time elapsed: " << time(nullptr) - start_time
 		       << "s." << endl;
@@ -290,10 +296,11 @@ class Eval : protected ArgParser {
 	       << " m " << m << " dt " << dt << " mu " << mu
 	       << (trace ? " trace" : "")
 	       << (gndst ? " ground state" : "")
-	       << (!(trace || gndst) ? " random state" : "") << endl;
+	       << (!(trace || gndst) ? " random state" : "");
 	if (use_krylov) {
-	    logger << " krylov dim" << krylov_dim;
+	    logger << " krylov dim " << krylov_dim;
 	}
+	logger << endl;
 
 	std::random_device rd;
 	std::mt19937 rg(rd());
