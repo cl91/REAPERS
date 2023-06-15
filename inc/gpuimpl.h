@@ -134,7 +134,7 @@ public:
 	friend class GPUImpl;
 	friend class DevSumOps;
 	// Host matrix is assumed to be in column major order
-	using HostMatrix = HostSumOps<FpType>::MatrixType;
+	using HostMatrix = typename HostSumOps<FpType>::MatrixType;
 	// Matrix is of dimension rowdim by coldim
 	size_t rowdim;
 	size_t coldim;
@@ -294,7 +294,7 @@ public:
     };
 
     // For the eigenvalues we expose the host vector to the user.
-    using EigenVals = HostSumOps<FpType>::EigenVals;
+    using EigenVals = typename HostSumOps<FpType>::EigenVals;
     using EigenVecs = MatrixType;
 
 private:
@@ -913,7 +913,7 @@ inline void GPUImpl::init_random(VecSizeType<FpType> size, BufType<FpType> v) {
 }
 
 template<RealScalar FpType>
-inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::Identity(
+inline typename DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::Identity(
     ssize_t rowdim, ssize_t coldim) {
     MatrixType id(rowdim, coldim);
     GPUImpl::eye<FpType>(id);
@@ -921,7 +921,7 @@ inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::Identity(
 }
 
 template<RealScalar FpType>
-inline DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator+=(
+inline typename DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator+=(
     const DevSumOps<FpType>::MatrixType &other) {
     if (rowdim != other.rowdim || coldim != other.coldim) {
 	ThrowException(InvalidArgument, "matrix dimensions", "must match");
@@ -931,7 +931,7 @@ inline DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator+=(
 }
 
 template<RealScalar FpType>
-inline DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator-=(
+inline typename DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator-=(
     const DevSumOps<FpType>::MatrixType &other) {
     if (rowdim != other.rowdim || coldim != other.coldim) {
 	ThrowException(InvalidArgument, "matrix dimensions", "must match");
@@ -941,7 +941,7 @@ inline DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator-=(
 }
 
 template<RealScalar FpType>
-inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::operator*(
+inline typename DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::operator*(
     const DevSumOps<FpType>::MatrixType &other) const {
     if (coldim != other.rowdim) {
 	std::stringstream ss;
@@ -956,7 +956,7 @@ inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::operator*(
 }
 
 template<RealScalar FpType>
-inline DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator*=(
+inline typename DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator*=(
     complex<FpType> c) {
     GPUImpl::scale_vec<FpType>(rowdim * coldim, dev_ptr, c);
     return *this;
@@ -977,7 +977,7 @@ inline FpType DevSumOps<FpType>::MatrixType::mat_norm() const {
 }
 
 template<RealScalar FpType>
-inline DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensystem(int len) const {
+inline typename DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensystem(int len) const {
     size_t dim = 1ULL << len;
     if (!dev_eigenvals || eigenvecs->rowdim != dim) {
 	if (dev_eigenvals) {
@@ -1042,7 +1042,7 @@ inline DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensystem(int len
 }
 
 template<RealScalar FpType>
-inline DevSumOps<FpType>::MatrixType DevSumOps<FpType>::_matexp(complex<FpType> c,
+inline typename DevSumOps<FpType>::MatrixType DevSumOps<FpType>::_matexp(complex<FpType> c,
 								int len) const {
     get_eigensystem(len);
     assert(dev_eigenvals);
