@@ -32,6 +32,7 @@ Revision History:
 #include <fstream>
 #include <boost/program_options.hpp>
 #include <filesystem>
+#include <fenv.h>
 
 namespace progopts = boost::program_options;
 
@@ -56,6 +57,7 @@ public:
     float tmax;
     int krylov_dim;
     bool trace;
+    bool throw_fpinvalid;
     float cache_size_vram;
     float cache_size_gb;
 
@@ -99,7 +101,9 @@ public:
 	     progopts::value<float>(&cache_size_gb)->default_value(0.0),
 	     "Set the matexp cache size to be the specified GB. For CPU backend"
 	     " the default is 16GB. For GPU backend the default is 50% of"
-	     " available VRAM at program startup.");
+	     " available VRAM at program startup.")
+	    ("throw-fpinvalid", progopts::bool_switch(&throw_fpinvalid)->default_value(false),
+	     "Throw an exception when an invalid floating point operation is encountered.");
 
 	// Let our children add their own supported options.
 	parse_hook();
@@ -156,6 +160,14 @@ public:
 		return false;
 	    }
 	    REAPERS::GPUImpl::set_max_cache_size(cache_size_vram);
+	}
+#endif
+
+#ifndef NDEBUG
+	if (throw_fpinvalid) {
+#endif
+	    feenableexcept(FE_INVALID);
+#ifndef NDEBUG
 	}
 #endif
 
