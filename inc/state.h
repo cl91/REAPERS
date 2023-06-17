@@ -417,16 +417,17 @@ public:
 
     // Release all the internal buffers allocated.
     void gc() {
+	auto nbufs = num_bufs();
 	assert(len);
 	if (!len) return;
 	assert(curbuf >= 0);
-	assert(curbuf < num_bufs());
+	assert(curbuf < nbufs);
 	if (curbuf != 0) {
 	    swap_bufs(0, -curbuf);
 	}
 	// We cannot call resize() because our Impl::VecType is not
 	// copy construtable.
-	for (int i = 0; i < (num_bufs()-1); i++) {
+	for (int i = 0; i < (nbufs-1); i++) {
 	    bufs.pop_back();
 	}
 	curbuf = 0;
