@@ -906,7 +906,7 @@ public:
 template<RealScalar FpType>
 inline void GPUImpl::init_random(VecSizeType<FpType> size, BufType<FpType> v) {
     // Generate 2*size random numbers
-    CURAND_CALL(gen_norm((FpType *)v.dev_ptr, 2*size));
+    CURAND_CALL(gen_norm((FpType *)v.dev_ptr, size_t(size)*2));
     // Normalize the resulting vector
     FpType c = 1/vec_norm(size, v);
     scale_vec(size, v, c);
