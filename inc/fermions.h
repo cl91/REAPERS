@@ -28,7 +28,7 @@ template<typename T>
 class SubspaceView;
 
 template<typename T>
-concept SubspaceViewType = BareTypeSpecializes<T, SubspaceView>;
+concept SubspaceViewType = internal::BareTypeSpecializes<T, SubspaceView>;
 
 // A SubspaceView of a SumOps is simply a SumOps with the spin chain length
 // fixed. In other words, it's as if SumOps has been projected into the sub-

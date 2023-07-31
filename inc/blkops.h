@@ -24,9 +24,6 @@ Revision History:
 #include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
 #endif
 
-template<typename T>
-concept BareType = std::same_as<T, std::remove_cvref_t<T>>;
-
 namespace internal {
     template<typename T>
     concept HasEval = requires(T t) { t.eval(); };
@@ -36,6 +33,32 @@ namespace internal {
 
     template<typename T>
     auto eval(T &&t) -> T;
+
+    template<typename T>
+    concept HasSize = requires(T t) {
+	{ t.size() } -> std::convertible_to<bool>;
+    };
+
+    template<typename T>
+    concept BareType = std::same_as<T, std::remove_cvref_t<T>>;
+
+    // Some concept magic that checks if class type S (the implicit concept
+    // argument) is indeed a specialization of T type (e.g. for T=BlockVec
+    // and S=BlockVec<Args>, the concept is satisfied). Also accepts classes
+    // deriving from specializations of T. Basically we check whether the
+    // lambda function defined below accepts an object of type S.
+    template<typename S, template<typename> typename T, typename ...Args>
+    concept Specializes = requires (S s) {
+	[]<typename ...TmplArgs>(T<Args..., TmplArgs...> &){}(s);
+    };
+
+    template<typename S, template<typename> typename T, typename ...Args>
+    concept BareTypeSpecializes = Specializes<std::remove_cvref_t<S>, T, Args...>;
+
+    // We need T to have a T::size() method with which we can check whether
+    // the specified object is empty.
+    template<typename T>
+    concept BlockType = BareType<T> && HasSize<T>;
 }
 
 #define _REAPERS_evaltype(x)					\
@@ -49,24 +72,11 @@ namespace internal {
 #define _REAPERS_forward(T, t, a)			\
     static_cast<decltype((std::forward<T>(t).a))>(t.a)
 
-// Some concept magic that checks if class type S (the implicit concept
-// argument) is indeed a specialization of T type (e.g. for T=BlockVec
-// and S=BlockVec<Args>, the concept is satisfied). Also accepts classes
-// deriving from specializations of T. Basically we check whether the
-// lambda function defined below accepts an object of type S.
-template<typename S, template<typename> typename T, typename ...Args>
-concept Specializes = requires (S s) {
-    []<typename ...TmplArgs>(T<Args..., TmplArgs...> &){}(s);
-};
-
-template<typename S, template<typename> typename T, typename ...Args>
-concept BareTypeSpecializes = Specializes<std::remove_cvref_t<S>, T, Args...>;
-
-template<BareType T>
+template<internal::BlockType T>
 struct BlockDiag;
 
 template<typename B>
-concept BlockDiagType = BareTypeSpecializes<B, BlockDiag>;
+concept BlockDiagType = internal::BareTypeSpecializes<B, BlockDiag>;
 
 // This class represents a block diagonal matrix
 //    B = ( bLL  0  )
@@ -77,9 +87,9 @@ concept BlockDiagType = BareTypeSpecializes<B, BlockDiag>;
 // blocks. However, if you do modify LL or RR you need to make sure
 // that nullLL and nullRR are modified accordingly. This applies to
 // the other block matrix forms as well.
-template<BareType T>
+template<internal::BlockType T>
 struct BlockDiag {
-    // nullLL indicates that LL is a zero block, ie. LL == T{}.
+    // nullLL indicates that LL is a zero block, ie. LL.size() == false.
     // This allows us to skip the additions and multiplications below
     // if a block is zero. Likewise for the other Block classes below.
     bool nullLL, nullRR;
@@ -87,13 +97,8 @@ struct BlockDiag {
 
     BlockDiag() : nullLL(true), nullRR(true), LL{}, RR{} {}
     BlockDiag(T LL, T RR) : LL(LL), RR(RR) {
-	// Note: due to issues with ISO C++ ambiguous comparison operators
-	// we cannot write nullLL = (LL == T{}) as this would generate a
-	// warning when T is an Eigen3 matrix class. We instead explicitly
-	// define an empty T object.
-	T empty{};
-	nullLL = (LL == empty);
-	nullRR = (RR == empty);
+	nullLL = !LL.size();
+	nullRR = !RR.size();
     }
 
     BlockDiag(const BlockDiag &) = default;
@@ -178,25 +183,24 @@ struct BlockDiag {
     }
 };
 
-template<BareType T>
+template<internal::BlockType T>
 struct BlockAntiDiag;
 
 template<typename B>
-concept BlockAntiDiagType = BareTypeSpecializes<B, BlockAntiDiag>;
+concept BlockAntiDiagType = internal::BareTypeSpecializes<B, BlockAntiDiag>;
 
 // This class represents a block anti-diagonal matrix
 //    B = ( 0   bLR )
 //        ( bRL  0  )
-template<BareType T>
+template<internal::BlockType T>
 struct BlockAntiDiag {
     bool nullLR, nullRL;
     T LR, RL;
 
     BlockAntiDiag() : nullLR(true), nullRL(true), LR{}, RL{} {}
     BlockAntiDiag(T LR, T RL) : LR(LR), RL(RL) {
-	T empty{};
-	nullLR = (LR == empty);
-	nullRL = (RL == empty);
+	nullLR = !LR.size();
+	nullRL = !RL.size();
     }
 
     BlockAntiDiag(const BlockAntiDiag &) = default;
@@ -263,24 +267,23 @@ struct BlockAntiDiag {
     double trace() const { return 0.0; }
 };
 
-template<BareType T>
+template<internal::BlockType T>
 struct BlockOp;
 
 template<typename B>
-concept BlockOpType = BareTypeSpecializes<B, BlockOp>;
+concept BlockOpType = internal::BareTypeSpecializes<B, BlockOp>;
 
 // This class represents a general block matrix
 //    B = (LL LR)
 //        (RL RR)
-template<BareType T>
+template<internal::BlockType T>
 struct BlockOp : BlockDiag<T>, BlockAntiDiag<T> {
     BlockOp(T LL = {}, T LR = {}, T RL = {}, T RR = {})
 	: BlockDiag<T>(LL,RR), BlockAntiDiag<T>(LR,RL) {
-	T empty{};
-	this->nullLL = (LL == empty);
-	this->nullRR = (RR == empty);
-	this->nullLR = (LR == empty);
-	this->nullRL = (RL == empty);
+	this->nullLL = !LL.size();
+	this->nullRR = !RR.size();
+	this->nullLR = !LR.size();
+	this->nullRL = !RL.size();
     }
 
     BlockOp(const BlockOp &) = default;
@@ -364,21 +367,21 @@ struct BlockOp : BlockDiag<T>, BlockAntiDiag<T> {
     }
 };
 
-template<BareType T>
+template<internal::BlockType T>
 struct BlockVec;
 
 template<typename B>
-concept BlockVecType = BareTypeSpecializes<B, BlockVec>;
+concept BlockVecType = internal::BareTypeSpecializes<B, BlockVec>;
 
 // This class represents a column vector in block form
 //    V = (L)
 //        (R)
-template<BareType T>
+template<internal::BlockType T>
 struct BlockVec {
     bool nullL, nullR;
     T L, R;
 
-    BlockVec(T L = {}, T R = {}) : nullL{L==T{}}, nullR{R==T{}}, L(L), R(R) {}
+    BlockVec(T L = {}, T R = {}) : nullL{!L.size()}, nullR{!R.size()}, L(L), R(R) {}
 
     BlockVec(const BlockVec &) = default;
     BlockVec(BlockVec &&) = default;
@@ -401,7 +404,7 @@ struct BlockVec {
 	return *this;
     }
 
-    template<BareType T1>
+    template<internal::BlockType T1>
     BlockVec &operator+=(const BlockVec<T1> &rhs) {
 	if (!rhs.nullL) {
 	    if (!nullL) {
@@ -435,10 +438,12 @@ struct BlockVec {
 // one of the four block matrix forms. This is needed when we define the
 // operators below.
 template<typename B>
-concept BlockForm = Specializes<B, BlockDiag> || Specializes<B, BlockAntiDiag>
-    || Specializes<B, BlockOp> || Specializes<B, BlockVec>;
+concept BlockForm = internal::Specializes<B, BlockDiag>
+    || internal::Specializes<B, BlockAntiDiag>
+    || internal::Specializes<B, BlockOp>
+    || internal::Specializes<B, BlockVec>;
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator+(const BlockDiag<T0> &op0,
 		      const BlockDiag<T1> &op1) {
     return BlockDiag(
@@ -446,7 +451,7 @@ inline auto operator+(const BlockDiag<T0> &op0,
 	(op0.nullRR||op1.nullRR) ? (op0.nullRR?op1.RR:op0.RR) : (op0.RR + op1.RR));
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator+(const BlockAntiDiag<T0> &op0,
 		      const BlockAntiDiag<T1> &op1) {
     return BlockAntiDiag(
@@ -474,7 +479,7 @@ inline auto operator/=(B &op, S c) {
     return op *= S{1} / c;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockDiag<T0> &op0,
 		      const BlockDiag<T1> &op1) {
     using Ty = _REAPERS_evaltype(op0.LL * op1.LL);
@@ -485,7 +490,7 @@ inline auto operator*(const BlockDiag<T0> &op0,
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockDiag<T0> &op0,
 		      const BlockAntiDiag<T1> &op1) {
     using Ty = _REAPERS_evaltype(op0.LL * op1.LR);
@@ -496,7 +501,7 @@ inline auto operator*(const BlockDiag<T0> &op0,
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockAntiDiag<T0> &op0,
 		      const BlockDiag<T1> &op1) {
     using Ty = _REAPERS_evaltype(op0.LR * op1.RR);
@@ -507,7 +512,7 @@ inline auto operator*(const BlockAntiDiag<T0> &op0,
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockAntiDiag<T0> &op0,
 		      const BlockAntiDiag<T1> &op1) {
     using Ty = _REAPERS_evaltype(op0.LR * op1.RL);
@@ -518,7 +523,7 @@ inline auto operator*(const BlockAntiDiag<T0> &op0,
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockOp<T0> &op0,
 		      const BlockDiag<T1> &op1) {
     using Ty = _REAPERS_evaltype(op0.LL * op1.LL);
@@ -533,7 +538,7 @@ inline auto operator*(const BlockOp<T0> &op0,
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockOp<T0> &op0,
 		      const BlockAntiDiag<T1> &op1) {
     using Ty = _REAPERS_evaltype(op0.LR * op1.RL);
@@ -548,7 +553,7 @@ inline auto operator*(const BlockOp<T0> &op0,
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockDiag<T0> &op0,
 		      const BlockOp<T1> &op1) {
     using Ty = _REAPERS_evaltype(op0.LL * op1.LL);
@@ -563,7 +568,7 @@ inline auto operator*(const BlockDiag<T0> &op0,
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockAntiDiag<T0> &op0,
 		      const BlockOp<T1> &op1) {
     using Ty = _REAPERS_evaltype(op0.LR * op1.RL);
@@ -578,7 +583,7 @@ inline auto operator*(const BlockAntiDiag<T0> &op0,
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockOp<T0> &op0,
 		      const BlockOp<T1> &op1) {
     using Ty = _REAPERS_evaltype(op0.LL * op1.LL);
@@ -606,7 +611,7 @@ inline auto operator*(const BlockOp<T0> &op0,
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockDiag<T0> &op, const BlockVec<T1> &b) {
     using Ty = _REAPERS_evaltype(op.LL * b.L);
     Ty L = (op.nullLL || b.nullL) ? Ty{} : op.LL * b.L;
@@ -617,7 +622,7 @@ inline auto operator*(const BlockDiag<T0> &op, const BlockVec<T1> &b) {
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockAntiDiag<T0> &op, const BlockVec<T1> &b) {
     using Ty = _REAPERS_evaltype(op.LR * b.R);
     Ty L = (op.nullLR || b.nullR) ? Ty{} : op.LR * b.R;
@@ -628,13 +633,13 @@ inline auto operator*(const BlockAntiDiag<T0> &op, const BlockVec<T1> &b) {
     return res;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockOp<T0> &op, const BlockVec<T1> &b) {
     return static_cast<const BlockDiag<T0> &>(op) * b
 	+ static_cast<const BlockAntiDiag<T0> &>(op) * b;
 }
 
-template<BareType T0, BareType T1>
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator*(const BlockVec<T0> &a, const BlockVec<T1> &b) {
     using Ty = _REAPERS_evaltype(a.L * b.L);
     Ty resL = (a.nullL || b.nullL) ? Ty{} : a.L * b.L;
@@ -642,26 +647,26 @@ inline auto operator*(const BlockVec<T0> &a, const BlockVec<T1> &b) {
     return resL + resR;
 }
 
-template<BareType T>
+template<internal::BlockType T>
 inline std::ostream &operator<<(std::ostream &os, const BlockDiag<T> &op) {
     os << "BlockDiag<" << op.LL << ", " << op.RR << ">";
     return os;
 }
 
-template<BareType T>
+template<internal::BlockType T>
 inline std::ostream &operator<<(std::ostream &os, const BlockAntiDiag<T> &op) {
     os << "BlockAntiDiag<" << op.LR << ", " << op.RL << ">";
     return os;
 }
 
-template<BareType T>
+template<internal::BlockType T>
 inline std::ostream &operator<<(std::ostream &os, const BlockOp<T> &op) {
     os << "BlockOp<" << op.LL << ", " << op.LR << ", "
        << op.RL << ", " << op.RR << ">";
     return os;
 }
 
-template<BareType T>
+template<internal::BlockType T>
 inline std::ostream &operator<<(std::ostream &os, const BlockVec<T> &b) {
     os << "BlockVec<" << b.L << ", " << b.R << ">";
     return os;

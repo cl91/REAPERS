@@ -140,6 +140,13 @@ public:
     // Dimension of the Hilbert space.
     IndexType dim() const { return 1 << len; }
 
+    // If the State is allocated, return the dimension of the Hilbert space.
+    // Otherwise zero is returned.
+    size_t size() const {
+	if (!len) return 0;
+	return dim();
+    }
+
     // Be careful when calling this function as this returns the raw pointer to the
     // current state vector. You should never save this pointer.
     typename Impl::template BufType<FpType> buf(int i = 0) {
