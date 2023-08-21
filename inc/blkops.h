@@ -589,19 +589,35 @@ inline auto operator*(const BlockOp<T0> &op0,
     using Ty = _REAPERS_evaltype(op0.LL * op1.LL);
     Ty LL = (op0.nullLL || op1.nullLL) ? Ty{} : op0.LL*op1.LL;
     if (!op0.nullLR && !op1.nullRL) {
-	LL += op0.LR*op1.RL;
+	if (op0.nullLL || op1.nullLL) {
+	    LL = op0.LR*op1.RL;
+	} else {
+	    LL += op0.LR*op1.RL;
+	}
     }
     Ty LR = (op0.nullLL || op1.nullLR) ? Ty{} : op0.LL*op1.LR;
     if (!op0.nullLR && !op1.nullRR) {
-	LR += op0.LR*op1.RR;
+	if (op0.nullLL || op1.nullLR) {
+	    LR = op0.LR*op1.RR;
+	} else {
+	    LR += op0.LR*op1.RR;
+	}
     }
     Ty RL = (op0.nullRL || op1.nullLL) ? Ty{} : op0.RL*op1.LL;
     if (!op0.nullRR && !op1.nullRL) {
-	LR += op0.RR*op1.RL;
+	if (op0.nullRL || op1.nullLL) {
+	    RL = op0.RR*op1.RL;
+	} else {
+	    RL += op0.RR*op1.RL;
+	}
     }
     Ty RR = (op0.nullRL || op1.nullLR) ? Ty{} : op0.RL*op1.LR;
     if (!op0.nullRR && !op1.nullRR) {
-	LR += op0.RR*op1.RR;
+	if (op0.nullRL || op1.nullLR) {
+	    RR = op0.RR*op1.RR;
+	} else {
+	    RR += op0.RR*op1.RR;
+	}
     }
     BlockOp res(LL, LR, RL, RR);
     res.nullLL = (op0.nullLL || op1.nullLL) && (op0.nullLR || op1.nullRL);
