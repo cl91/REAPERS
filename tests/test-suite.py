@@ -251,6 +251,8 @@ def evolve_state_test(req, reply):
     return almost_equal(*evolve_state_get_result(req, reply))
 
 def evolve_state_printnorm(req, reply):
+    t = req["t"]
+    beta = req["beta"]
     res = diff_norm(*evolve_state_get_result(req, reply))
     print(f"{reply['N']} {t} {beta} {res}")
 
@@ -277,6 +279,8 @@ def matexp_test(req, reply):
     return almost_equal(*matexp_get_result(req, reply))
 
 def matexp_printnorm(req, reply):
+    t = req["t"]
+    beta = req["beta"]
     res = diff_norm(*matexp_get_result(req, reply))
     print(f"{reply['N']} {t} {beta} {res}")
 
