@@ -110,7 +110,8 @@ First of all, thank you for your interest. To cite us in a paper, use the follow
 ## Publications
 
 - [1]. `[INSERT-CPC-PROG-LIB-PAPER]`
-- [2]. `[INSERT-SYK-PAPER]`
+- [2]. Sparsity independent Lyapunov exponent in the Sachdev-Ye-Kitaev model, García-García et al,
+       [arXiv:2311.00639](https://arxiv.org/abs/2311.00639)
 - [3]. Entanglement Transition and Replica Wormhole in the Dissipative
        Sachdev-Ye-Kitaev Model, Wang et al, [arXiv:2306.12571](https://arxiv.org/abs/2306.12571)
 
