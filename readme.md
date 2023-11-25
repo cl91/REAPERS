@@ -16,10 +16,9 @@ us to achieve a higher performance by eliminating the various overheads due to t
 and slow PETSc library.
 
 Using REAPERS we [2] have successfully calculated the out-of-time-ordered correlators (OTOC)
-of the sparse SYK model with N=62 fermions on a single A100 graphics card. For single precision,
-each disorder realization takes approximately 13 hours to complete. For double precision, each
-disorder realization takes approximately 16 hours. Here, one disorder realization
-has 15 data points and the tolerance of the Krylov method is set to the machine precision.
+of the sparse SYK model with N=64 fermions on a single A100 graphics card for single precision
+floating point and N=62 fermions for double precision floating point, in a reasonable amount of
+time (typically less than one hour per disorder realization per data point). 
 The previous state of the art was a similar calculation of N=50 dense SYK on a single V100 [4],
 which we can also reproduce. For the list of publications using REAPERS, see the Publications
 section below.
@@ -41,7 +40,7 @@ even get me started on Andromeda).
    the same time, maximizing the utility of computational resources.
 4. Supports both single precision floating point (FP32) and double precision (FP64), and
    can also be switched at runtime. This allows you to run simulations on consumer-grade
-   nVidia cards, as they usually have poor FP64 performance (but decent FP32 performance).
+   nVidia cards, as they usually have reduced FP64 performance but decent FP32 performance.
 5. Easy to use. No need to build or install as we are a header-only library for the host
    (ie. CPU) code. There is one source file for the CUDA kernels which you simply link
    with after you've built the host code (you can also do it in one single step, by using
