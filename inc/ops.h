@@ -312,7 +312,7 @@ public:
 	return SpinOp(op.coeff * s, op.bits);
     }
 
-    SpinOp operator*(complex<FpType> s) {
+    SpinOp operator*(complex<FpType> s) const {
 	return SpinOp(coeff * s, bits);
     }
 
@@ -324,6 +324,10 @@ public:
 	    }
 	}
 	return SpinOp((minus ? -coeff : coeff) * op1.coeff, bits ^ op1.bits);
+    }
+
+    SpinOp operator<<(IndexType n) const {
+	return SpinOp(coeff, bits << (n*2));
     }
 
     bool operator==(const SpinOp &other) const {

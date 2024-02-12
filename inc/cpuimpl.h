@@ -347,6 +347,17 @@ public:
 	return ops * s;
     }
 
+    // Shift the spin indices of all operators in the sum by an integer.
+    // In other words, for operator S we return S \otimes I_n where I_n is
+    // the identity matrix of dimension 2^n.
+    HostSumOps operator<<(typename SpinOp<FpType>::IndexType len) const {
+	HostSumOps res;
+	for (auto &&op : *this) {
+	    res += op << len;
+	}
+	return res;
+    }
+
     // Returns true if all operators in the sum are Hermitian.
     bool is_hermitian() const {
 	for (auto &op : *this) {

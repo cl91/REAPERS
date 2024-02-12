@@ -164,6 +164,12 @@ public:
 	return *this;
     }
 
+    // Compute the tensor product of two subspace views.
+    // rhs has higher spin indices, ie. we return (rhs \otimes *this).
+    SubspaceView tensor(const SubspaceView &rhs) const {
+	return SubspaceView{len+rhs.len, *this * (rhs << len)};
+    }
+
     bool operator==(const SubspaceView &rhs) const {
 	if (len != rhs.len) { return false; }
 	return SumOpsTy::operator==(rhs);
