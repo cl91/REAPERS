@@ -252,8 +252,9 @@ public:
 	    ThrowException(InvalidArgument, "dimensions of states must match");
 	}
 	assert(len);
-	if (!len) return {};
-	Impl::add_vec(dim(), buf(), rhs.buf());
+	if (len) {
+	    Impl::add_vec(dim(), buf(), rhs.buf());
+	}
 	return *this;
     }
 
@@ -502,6 +503,10 @@ struct BlockState : BlockVec<State<FpType,Impl>> {
 	BlockVec<State<FpType,Impl>>::operator=(std::forward<B>(st));
 	return *this;
     }
+
+    // Likewise for copy/move ctors.
+    template<BlockVecType B>
+    BlockState(B &&st) : BlockVec<State<FpType,Impl>>(std::forward<B>(st)) {}
 
     // We cannot use automatic type deduction here because the operator[]
     // of the State class might return a non-default construtable object.

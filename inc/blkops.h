@@ -388,8 +388,8 @@ struct BlockVec {
     bool operator==(const BlockVec &) const = default;
 
     template<BlockVecType T1>
-    BlockVec(T1 &&b) : L(_REAPERS_forward(T1,b,L)), R(_REAPERS_forward(T1,b,R)),
-		       nullL(b.nullL), nullR(b.nullR) {}
+    BlockVec(T1 &&b) : nullL(b.nullL), nullR(b.nullR),
+		       L(_REAPERS_forward(T1,b,L)), R(_REAPERS_forward(T1,b,R)) {}
 
     template<BlockVecType T1>
     BlockVec &operator=(T1 &&b) {
@@ -404,8 +404,8 @@ struct BlockVec {
 	return *this;
     }
 
-    template<internal::BlockType T1>
-    BlockVec &operator+=(const BlockVec<T1> &rhs) {
+    template<BlockVecType T1>
+    BlockVec &operator+=(T1 &&rhs) {
 	if (!rhs.nullL) {
 	    if (!nullL) {
 		L += rhs.L;
@@ -457,6 +457,23 @@ inline auto operator+(const BlockAntiDiag<T0> &op0,
     return BlockAntiDiag(
 	(op0.nullLR||op1.nullLR) ? (op0.nullLR?op1.LR:op0.LR) : (op0.LR + op1.LR),
 	(op0.nullRL||op1.nullRL) ? (op0.nullRL?op1.RL:op0.RL) : (op0.RL + op1.RL));
+}
+
+template<internal::BlockType T>
+inline auto operator+(const BlockVec<T> &op0,
+		      const BlockVec<T> &op1) {
+    BlockVec<T> op{op0};
+    op += op1;
+    return op;
+}
+
+template<internal::BlockType T>
+inline auto operator-(const BlockVec<T> &op0,
+		      const BlockVec<T> &op1) {
+    BlockVec<T> op{op1};
+    op *= -1;
+    op += op0;
+    return op;
 }
 
 // Scalar multiplication is commutative and can be done from both sides.
