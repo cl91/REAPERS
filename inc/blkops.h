@@ -460,6 +460,23 @@ inline auto operator+(const BlockAntiDiag<T0> &op0,
 }
 
 template<internal::BlockType T>
+inline auto operator+(const BlockOp<T> &op0,
+		      const BlockOp<T> &op1) {
+    BlockOp<T> op{op0};
+    op += op1;
+    return op;
+}
+
+template<internal::BlockType T>
+inline auto operator-(const BlockOp<T> &op0,
+		      const BlockOp<T> &op1) {
+    BlockOp<T> op{op1};
+    op *= -1;
+    op += op0;
+    return op;
+}
+
+template<internal::BlockType T>
 inline auto operator+(const BlockVec<T> &op0,
 		      const BlockVec<T> &op1) {
     BlockVec<T> op{op0};
