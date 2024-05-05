@@ -208,9 +208,9 @@ struct BlockAntiDiag {
     bool operator==(const BlockAntiDiag &) const = default;
 
     template<BlockAntiDiagType T1>
-    explicit BlockAntiDiag(T1 &&b) : LR(_REAPERS_forward(T1,b,LR)),
-				     RL(_REAPERS_forward(T1,b,RL)),
-				     nullLR{b.nullLR}, nullRL{b.nullRL} {}
+    explicit BlockAntiDiag(T1 &&b) : nullLR{b.nullLR}, nullRL{b.nullRL},
+				     LR(_REAPERS_forward(T1,b,LR)),
+				     RL(_REAPERS_forward(T1,b,RL)) {}
 
     template<BlockAntiDiagType T1>
     BlockAntiDiag &operator=(T1 &&b) {
