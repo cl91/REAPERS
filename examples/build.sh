@@ -3,6 +3,7 @@ CUDA_INC=/opt/cuda/include
 
 OPT=0
 GPU=0
+SINGLE_GPU=0
 INTEL=0
 buildty="debug"
 
@@ -28,21 +29,30 @@ if [[ $1 == "gpu-icpx" ]]; then
     buildty="gpu-icpx"
 fi
 
+if [[ $1 == "single-gpu" ]]; then
+    GPU=1
+    SINGLE_GPU=1
+    buildty="single-gpu"
+fi
+
 # Switch current directory to where this script is located.
 cd "$(dirname "$0")"
 GITHASH=$(git show -s --format="%h (%ci)" HEAD)
 COMMONOPTS="-std=c++20 -Wall -Wno-maybe-uninitialized -Wno-uninitialized -I${EIGEN_INC} -I../inc"
 LINKLIBS="-lboost_program_options"
-DBGOPTS="-DREAPERS_DEBUG -g"
+DBGOPTS="-DREAPERS_DEBUG -g -G"
 NDBGOPTS="-DNDEBUG -O3 -ffast-math -mtune=native"
 if (( $OPT )) || (( $INTEL )) || (( $GPU )) || (( $GPU_ICPX )); then
     COMMONOPTS+=" $NDBGOPTS"
 else
     COMMONOPTS+=" $DBGOPTS"
 fi
+if (( $SINGLE_GPU )); then
+    COMMONOPTS+=" -DREAPERS_NO_MULTIGPU"
+fi
 # You can also specify -DMAX_NUM_FERMIONS=<N> to hard-code the maximum number of fermions.
 # This might make things a little faster, but probably won't matter much.
-NVCC="nvcc -forward-unknown-to-host-compiler $COMMONOPTS $NDBGOPTS -Wno-unknown-pragmas -lcublas -lcusolver -lcurand ../src/krnl.cu -march=native -fopenmp $LINKLIBS"
+NVCC="nvcc -forward-unknown-to-host-compiler $COMMONOPTS $NDBGOPTS -Wno-unknown-pragmas -lcublas -lcusolver -lcurand ../src/krnl.cu -march=native -fopenmp $LINKLIBS -arch sm_80"
 CXX="c++ -DREAPERS_NOGPU $COMMONOPTS -march=native -fopenmp $LINKLIBS"
 ICXX="icpx -DREAPERS_NOGPU $COMMONOPTS -xhost -fiopenmp -Wno-tautological-constant-compare -Wno-unused-but-set-variable $LINKLIBS"
 ICXX_BUILD="icpx $COMMONOPTS -fPIE -xhost -fiopenmp -Wno-tautological-constant-compare -Wno-unused-but-set-variable -Wno-unknown-pragmas -I/opt/cuda/include"

@@ -27,8 +27,8 @@ Revision History:
     do {							\
 	auto __REAPERS__res = (x);				\
 	if (__REAPERS__res != cudaSuccess) {			\
-	    throw RuntimeError(__FILE__, __LINE__, __func__,	\
-			       "CUDA", __REAPERS__res);		\
+	    throw CudaError(__FILE__, __LINE__, __func__,	\
+			    __REAPERS__res);			\
 	}							\
     } while(0)
 
@@ -64,6 +64,12 @@ Revision History:
     if ((p) == nullptr) {			\
 	ThrowException(DevOutOfMem, (sz));	\
     }
+
+#ifdef REAPERS_NO_MULTIGPU
+#define REAPERS_MAX_GPU_COUNT (1)
+#elif !defined(REAPERS_MAX_GPU_COUNT)
+#define REAPERS_MAX_GPU_COUNT (8)
+#endif
 
 // CUDA defines its own complex number type which is different from
 // cuda::std::complex so we need to convert between them. Fortunately
@@ -298,7 +304,7 @@ public:
     using EigenVecs = MatrixType;
 
 private:
-    mutable SpinOp<FpType> *dev_ops;
+    mutable std::vector<SpinOp<FpType> *> dev_ops;
     mutable std::unique_ptr<MatrixType> dev_mat;
     mutable EigenVals host_eigenvals;
     mutable FpType *dev_eigenvals;
@@ -309,38 +315,12 @@ private:
     // Upload the host summed operators to the device. If the number of operators
     // is less than 2^len, then simply copy the operators to the device side.
     // Otherwise, generate the (dense) matrix representing the sum of operators.
-    void upload(typename SpinOp<FpType>::IndexType len) const {
-	if (dev_ops || dev_mat) {
-	    return;
-	}
-	if (this->ops.size() < (1ULL << len)) {
-	    auto size = this->ops.size() * sizeof(SpinOp<FpType>);
-	    cuda_alloc(dev_ops, size);
-	    CUDA_CALL(cudaMemcpy(dev_ops, this->ops.data(),
-				 size, cudaMemcpyHostToDevice));
-	} else {
-	    get_matrix(len);
-	}
-    }
+    void upload(typename SpinOp<FpType>::IndexType len) const;
 
     // Free the device copy of the host summed operators. This should
     // be called after every update to the operator list, so next time
     // GPUImpl::apply_ops can upload a fresh copy of the latest SumOps.
-    void release() const {
-	// We must call the parent class release() function.
-	HostSumOps<FpType>::release();
-	mini_release();
-	if (dev_ops) {
-	    cudaFree(dev_ops);
-	    dev_ops = nullptr;
-	}
-	dev_mat.reset(nullptr);
-	host_eigenvals.resize(0);
-	if (dev_eigenvals) {
-	    cudaFree(dev_eigenvals);
-	    dev_eigenvals = nullptr;
-	}
-    }
+    void release() const;
 
     void mini_release() const {
 	HostSumOps<FpType>::mini_release();
@@ -408,10 +388,8 @@ public:
 	return REAPERS::HostSumOps<FpType>::_matexp_helper(*this, c, len);
     }
 
-    friend std::ostream &operator<<(std::ostream &os, const DevSumOps &s) {
-	os << static_cast<const HostSumOps<FpType> &>(s) << " devptr " << s.dev_ops;
-	return os;
-    }
+    template<RealScalar Fp>
+    friend std::ostream &operator<<(std::ostream &os, const DevSumOps<Fp> &s);
 };
 
 // Class that implements basic vector operations on the GPU using CUDA.
@@ -425,8 +403,8 @@ class GPUImpl {
     // (both copy and move) assignment operators.
     template<RealScalar FpType>
     class DeviceVec {
-	complex<FpType> *dev_ptr;
-	size_t dim;
+	std::vector<complex<FpType> *> dev_ptrs;
+	size_t dev_dim;		// Dimension per device
 	friend class GPUImpl;
 	DeviceVec(const DeviceVec &) = delete;
 	DeviceVec &operator=(const DeviceVec &) = delete;
@@ -437,37 +415,60 @@ class GPUImpl {
 	public:
 	    ElemRefType(DeviceVec &vec, size_t idx) : vec(vec), idx(idx) {}
 	    ElemRefType &operator=(complex<FpType> s) {
-		CUDA_CALL(cudaMemcpy(vec.dev_ptr+idx, &s, sizeof(complex<FpType>),
+		int dev = idx / vec.dev_dim;
+		size_t dev_idx = idx & (vec.dev_dim - 1);
+		CUDA_CALL(cudaMemcpy(vec.dev_ptrs[dev] + dev_idx, &s, sizeof(complex<FpType>),
 				     cudaMemcpyHostToDevice));
 		return *this;
 	    }
 	};
     public:
-	DeviceVec(size_t dim) : dim(dim) {
-	    cuda_alloc(dev_ptr, dim * sizeof(complex<FpType>));
+	DeviceVec(size_t dim) : dev_ptrs(GPUImpl::get_device_count()),
+				dev_dim(dim / GPUImpl::get_device_count()) {
+	    for (int i = 0; i < GPUImpl::get_device_count(); i++) {
+		set_device(i);
+		cuda_alloc(dev_ptrs[i], dev_dim * sizeof(complex<FpType>));
+	    }
 	}
 
-	DeviceVec(DeviceVec &&v) : dim(v.dim) {
-	    dev_ptr = v.dev_ptr;
-	    v.dev_ptr = nullptr;
+	DeviceVec(DeviceVec &&v) : dev_dim(v.dev_dim) {
+	    swap(dev_ptrs, v.dev_ptrs);
 	}
 
-	explicit DeviceVec(const CPUImpl::VecType<FpType> &v) : dim(v.dimension()) {
-	    cuda_alloc(dev_ptr, dim * sizeof(complex<FpType>));
-	    CUDA_CALL(cudaMemcpy(dev_ptr, v.get(), dim * sizeof(complex<FpType>),
-				 cudaMemcpyHostToDevice));
+	explicit DeviceVec(const CPUImpl::VecType<FpType> &v) :
+	    dev_ptrs(GPUImpl::get_device_count()),
+	    dev_dim(v.dimension() / GPUImpl::get_device_count()) {
+	    for (int i = 0; i < GPUImpl::get_device_count(); i++) {
+		set_device(i);
+		cuda_alloc(dev_ptrs[i], dev_dim * sizeof(complex<FpType>));
+	    }
+	    for (int i = 0; i < GPUImpl::get_device_count(); i++) {
+		CUDA_CALL(cudaMemcpyAsync(dev_ptrs[i], v.get() + dev_dim * i,
+					  dev_dim * sizeof(complex<FpType>),
+					  cudaMemcpyHostToDevice));
+	    }
+	    sync_devices();
 	}
 
 	explicit operator CPUImpl::VecType<FpType>() const {
-	    CPUImpl::VecType<FpType> v(dim);
-	    CUDA_CALL(cudaMemcpy(v.get(), dev_ptr, dim * sizeof(complex<FpType>),
-				 cudaMemcpyDeviceToHost));
+	    CPUImpl::VecType<FpType> v(dev_dim * GPUImpl::get_device_count());
+	    for (int i = 0; i < GPUImpl::get_device_count(); i++) {
+		CUDA_CALL(cudaMemcpyAsync(v.get() + dev_dim * i,
+					  dev_ptrs[i], dev_dim * sizeof(complex<FpType>),
+					  cudaMemcpyDeviceToHost));
+	    }
+	    sync_devices();
 	    return v;
 	}
 
 	~DeviceVec() {
-	    if (dev_ptr != nullptr) {
-		cudaFree(dev_ptr);
+	    if (dev_ptrs.size()) {
+		assert((int)dev_ptrs.size() == GPUImpl::get_device_count());
+		for (int i = 0; i < GPUImpl::get_device_count(); i++) {
+		    if (dev_ptrs[i] != nullptr) {
+			cudaFree(dev_ptrs[i]);
+		    }
+		}
 	    }
 	}
 
@@ -475,12 +476,14 @@ class GPUImpl {
 	const DeviceVec &get() const { return *this; }
 
 	friend void swap(DeviceVec &lhs, DeviceVec &rhs) {
-	    std::swap(lhs.dev_ptr, rhs.dev_ptr);
+	    std::swap(lhs.dev_ptrs, rhs.dev_ptrs);
 	}
 
 	complex<FpType> operator[](size_t idx) const {
 	    complex<FpType> c;
-	    CUDA_CALL(cudaMemcpy(&c, dev_ptr+idx, sizeof(complex<FpType>),
+	    int dev = idx / dev_dim;
+	    size_t dev_idx = idx & (dev_dim - 1);
+	    CUDA_CALL(cudaMemcpy(&c, dev_ptrs[dev] + dev_idx, sizeof(complex<FpType>),
 				 cudaMemcpyDeviceToHost));
 	    return c;
 	}
@@ -492,18 +495,64 @@ class GPUImpl {
 
     class GPUContext {
 	friend class GPUImpl;
-	cublasHandle_t hcublas;
+	int num_dev;
+	std::vector<cublasHandle_t> vhcublas;
+	std::vector<curandGenerator_t> vrandgen;
 	cusolverDnHandle_t hcusolver;
-	curandGenerator_t randgen;
 	size_t vram_total_size;
 	size_t vram_free_size;
 	GPUContext() {
-	    CUBLAS_CALL(cublasCreate(&hcublas));
-	    CUSOLVER_CALL(cusolverDnCreate(&hcusolver));
-	    CURAND_CALL(curandCreateGenerator(&randgen, CURAND_RNG_PSEUDO_DEFAULT));
+#ifdef REAPERS_NO_MULTIGPU
+	    num_dev = 1;
+#else
+	    CUDA_CALL(cudaGetDeviceCount(&num_dev));
+	    // According to nvidia docs this function never returns num_dev == 0,
+	    // but to be safe let's make sure it's not zero.
+	    if (!num_dev) {
+		ThrowException(NoGpuDevice);
+	    }
+	    // If the number of device is not a power of two, reduce it to the
+	    // largest power of two that does not exceed the original number.
+	    if (num_dev & (num_dev - 1)) {
+		num_dev |= num_dev >> 1;
+		num_dev |= num_dev >> 2;
+		num_dev |= num_dev >> 4;
+		num_dev |= num_dev >> 8;
+		num_dev |= num_dev >> 16;
+		num_dev -= num_dev >> 1;
+	    }
+	    // Check if all devices can access each other through P2P link.
+	    for (int i = 0; i < num_dev; i++) {
+		CUDA_CALL(cudaSetDevice(i));
+		for (int j = 0; j < num_dev; j++) {
+		    if (i == j) {
+			continue;
+		    }
+		    int ok = 0;
+		    CUDA_CALL(cudaDeviceCanAccessPeer(&ok, i, j));
+		    if (!ok) {
+			ThrowException(NoP2PAccess, i, j);
+		    }
+		    CUDA_CALL(cudaDeviceEnablePeerAccess(j, 0));
+		}
+	    }
+#endif
 	    std::random_device rd;
-	    CURAND_CALL(curandSetPseudoRandomGeneratorSeed(randgen, rd()));
+	    vhcublas.resize(num_dev);
+	    vrandgen.resize(num_dev);
+	    for (int i = 0; i < num_dev; i++) {
+		CUDA_CALL(cudaSetDevice(i));
+		cublasHandle_t hcublas;
+		CUBLAS_CALL(cublasCreate(&hcublas));
+		vhcublas[i] = hcublas;
+		curandGenerator_t randgen;
+		CURAND_CALL(curandCreateGenerator(&randgen, CURAND_RNG_PSEUDO_DEFAULT));
+		CURAND_CALL(curandSetPseudoRandomGeneratorSeed(randgen, rd()));
+		vrandgen[i] = randgen;
+	    }
+	    set_device(0);
 	    CUDA_CALL(cudaMemGetInfo(&vram_free_size, &vram_total_size));
+	    CUSOLVER_CALL(cusolverDnCreate(&hcusolver));
 	}
     };
 
@@ -547,6 +596,10 @@ public:
 	return cache_size;
     }
 
+    static int get_device_count() {
+	return ctx.num_dev;
+    }
+
     template<RealScalar FpType>
     using VecType = DeviceVec<FpType>;
 
@@ -566,51 +619,86 @@ public:
     using SumOps = DevSumOps<FpType>;
 
 private:
-    template<RealScalar FpType>
-    static curandStatus_t gen_norm(FpType *vec, size_t n) {
-	return CudaComplex<FpType>::gen_norm(ctx.randgen, vec, n, 0.0, 1.0);
+    static void set_device(int i) {
+#ifndef REAPERS_NO_MULTIGPU
+	CUDA_CALL(cudaSetDevice(i));
+#endif
+    }
+
+    static void sync_devices() {
+	for (int i = 0; i < get_device_count(); i++) {
+	    sync_device(i);
+	}
+    }
+
+    static void sync_device(int i) {
+	CUDA_CALL(cudaSetDevice(i));
+	CUDA_CALL(cudaPeekAtLastError());
+	CUDA_CALL(cudaDeviceSynchronize());
     }
 
     template<RealScalar FpType>
-    static cublasStatus_t cublas_axpy(VecSizeType<FpType> n, complex<FpType> s,
+    static curandStatus_t gen_norm(int dev, FpType *vec, size_t n) {
+	set_device(dev);
+	return CudaComplex<FpType>::gen_norm(ctx.vrandgen[dev], vec, n, 0.0, 1.0);
+    }
+
+    // Compute y += s * x. x and y are the dev-th tile (ie. part of the state
+    // vector on device number dev) of two different state vectors. n is the dimension
+    // of the Hilbert space divided by the number of available GPU devices.
+    template<RealScalar FpType>
+    static cublasStatus_t cublas_axpy(int dev, VecSizeType<FpType> n, complex<FpType> s,
 				      const complex<FpType> *x, complex<FpType> *y) {
-	return CudaComplex<FpType>::cublas_axpy(ctx.hcublas, n,
+	set_device(dev);
+	return CudaComplex<FpType>::cublas_axpy(ctx.vhcublas[dev], n,
 						(CudaComplexConstPtr<FpType>)&s,
 						(CudaComplexConstPtr<FpType>)x, 1,
 						(CudaComplexPtr<FpType>)y, 1);
     }
 
+    // Compute x *= s. x is the dev-th tile of a state vector. n is the dimension
+    // of the Hilbert space divided by the number of available GPU devices.
     template<RealScalar FpType>
-    static cublasStatus_t cublas_scal(VecSizeType<FpType> n, FpType s,
+    static cublasStatus_t cublas_scal(int dev, VecSizeType<FpType> n, FpType s,
 				      complex<FpType> *x) {
 	// n*2 might exceed 2^32 so we need to be careful with integer casting.
 	int64_t n2 = static_cast<int64_t>(n) * 2;
-	return CudaComplex<FpType>::cublas_scal(ctx.hcublas, n2, &s, (FpType *)x, 1);
+	set_device(dev);
+	return CudaComplex<FpType>::cublas_scal(ctx.vhcublas[dev], n2, &s, (FpType *)x, 1);
     }
 
+    // Compute x *= s. x is the dev-th tile of a state vector. n is the dimension
+    // of the Hilbert space divided by the number of available GPU devices.
     template<RealScalar FpType>
-    static cublasStatus_t cublas_scal(VecSizeType<FpType> n, complex<FpType> s,
+    static cublasStatus_t cublas_scal(int dev, VecSizeType<FpType> n, complex<FpType> s,
 				      complex<FpType> *x) {
-	return CudaComplex<FpType>::cublas_cscal(ctx.hcublas, n,
+	set_device(dev);
+	return CudaComplex<FpType>::cublas_cscal(ctx.vhcublas[dev], n,
 						 (CudaComplexConstPtr<FpType>)&s,
 						 (CudaComplexPtr<FpType>)x, 1);
     }
 
+    // Compute <x|y> = x^dagger \cdot y. x and y are the dev-th tile (ie. part of the state
+    // vector on device number dev) of two state vectors (x and y can be the same). n is the
+    // dimension of the Hilbert space divided by the number of available GPU devices.
     template<RealScalar FpType>
-    static cublasStatus_t cublas_dotc(VecSizeType<FpType> n,
+    static cublasStatus_t cublas_dotc(int dev, VecSizeType<FpType> n,
 				      complex<FpType> &res,
 				      const complex<FpType> *x,
 				      const complex<FpType> *y) {
-	return CudaComplex<FpType>::cublas_dotc(ctx.hcublas, n,
+	set_device(dev);
+	return CudaComplex<FpType>::cublas_dotc(ctx.vhcublas[dev], n,
 						(CudaComplexConstPtr<FpType>)x, 1,
 						(CudaComplexConstPtr<FpType>)y, 1,
 						(CudaComplexPtr<FpType>)&res);
     }
 
+    // Compute \sqrt(<x|y>) = \sqrt(x^dagger \cdot y). x and y must be on the 0-th device.
     template<RealScalar FpType>
     static cublasStatus_t cublas_nrm2(VecSizeType<FpType> n, FpType &res,
 				      const complex<FpType> *x) {
-	return CudaComplex<FpType>::cublas_nrm2(ctx.hcublas, n,
+	set_device(0);
+	return CudaComplex<FpType>::cublas_nrm2(ctx.vhcublas[0], n,
 						(CudaComplexConstPtr<FpType>)x, 1, &res);
     }
 
@@ -622,7 +710,8 @@ private:
 				      const complex<FpType> *x,
 				      const complex<FpType> beta,
 				      bool adjoint = false) {
-	return CudaComplex<FpType>::cublas_gemv(ctx.hcublas,
+	set_device(0);
+	return CudaComplex<FpType>::cublas_gemv(ctx.vhcublas[0],
 						adjoint ? CUBLAS_OP_C : CUBLAS_OP_N,
 						(int64_t)rowdim, (int64_t)coldim,
 						(CudaComplexConstPtr<FpType>)&alpha,
@@ -641,7 +730,8 @@ private:
 				      const complex<FpType> *B,
 				      const complex<FpType> beta,
 				      bool adjointA = false, bool adjointB = false) {
-	return CudaComplex<FpType>::cublas_gemm(ctx.hcublas,
+	set_device(0);
+	return CudaComplex<FpType>::cublas_gemm(ctx.vhcublas[0],
 						adjointA ? CUBLAS_OP_C : CUBLAS_OP_N,
 						adjointB ? CUBLAS_OP_C : CUBLAS_OP_N,
 						(int64_t)rowdim, (int64_t)coldimB,
@@ -667,6 +757,7 @@ private:
 						       size_t &lworksz) {
 	auto ty = CudaComplex<FpType>::cuda_datatype;
 	auto rty = CudaComplex<FpType>::cuda_realtype;
+	set_device(0);
 	return cusolverDnXsyevd_bufferSize(ctx.hcusolver, params, jobz, uplo,
 					   dim, ty, mat, dim, rty, vals, ty,
 					   &dworksz, &lworksz);
@@ -686,6 +777,7 @@ private:
 					   int *d_info) {
 	auto ty = CudaComplex<FpType>::cuda_datatype;
 	auto rty = CudaComplex<FpType>::cuda_realtype;
+	set_device(0);
 	return cusolverDnXsyevd(ctx.hcusolver, params, jobz, uplo,
 				dim, ty, mat, dim, rty, vals, ty,
 				d_work, dworksz, l_work, lworksz, d_info);
@@ -697,49 +789,44 @@ private:
 	gridsize = size / blocksize;
     }
 
-    // Compute v0 += v1. v0 and v1 are assumed to point to different buffers.
+    // Compute v0 += v1. v0 and v1 are assumed to point to different buffers
+    // on the same device (with device id dev).
     template<RealScalar FpType>
-    static void add_vec(size_t size, complex<FpType> *v0,
+    static void add_vec(int dev, size_t size, complex<FpType> *v0,
 			const complex<FpType> *v1);
 
     // Compute res = v0 + v1. res is assumed to be different from both v0 and v1.
+    // All vectors must be on the same device (with device id dev).
     template<RealScalar FpType>
-    static void add_vec(size_t size, complex<FpType> *res,
+    static void add_vec(int dev, size_t size, complex<FpType> *res,
 			const complex<FpType> *v0, const complex<FpType> *v1);
 
-    // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
+    // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers
+    // on the same device (with device id dev).
     template<RealScalar FpType>
-    static void add_vec(size_t size, complex<FpType> *v0,
+    static void add_vec(int dev, size_t size, complex<FpType> *v0,
 			complex<FpType> s, const complex<FpType> *v1) {
-	CUBLAS_CALL(cublas_axpy(size, s, v1, v0));
+	CUBLAS_CALL(cublas_axpy(dev, size, s, v1, v0));
     }
 
-    // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
+    // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers
+    // on the same device (with device id dev).
     template<RealScalar FpType>
-    static void add_vec(size_t size, complex<FpType> *v0,
+    static void add_vec(int dev, size_t size, complex<FpType> *v0,
 			FpType s, const complex<FpType> *v1) {
-	CUBLAS_CALL(cublas_axpy(size, {s,0}, v1, v0));
+	CUBLAS_CALL(cublas_axpy(dev, size, {s,0}, v1, v0));
     }
 
-    // Compute v *= s where s is a real scalar.
+    // Compute v *= s where s is a real scalar. v must be on the device id dev.
     template<RealScalar FpType>
-    static void scale_vec(size_t size, complex<FpType> *v, FpType s) {
-	CUBLAS_CALL(cublas_scal(size, s, v));
+    static void scale_vec(int dev, size_t size, complex<FpType> *v, FpType s) {
+	CUBLAS_CALL(cublas_scal(dev, size, s, v));
     }
 
-    // Compute v *= s where s is a complex scalar.
+    // Compute v *= s where s is a complex scalar. v must be on the device id dev.
     template<RealScalar FpType>
-    static void scale_vec(size_t size, complex<FpType> *v, complex<FpType> s) {
-	CUBLAS_CALL(cublas_scal(size, s, v));
-    }
-
-    // Compute the vector norm of the complex vector v. In other words, compute
-    // n = sqrt(<v|v>) = sqrt(v^\dagger \cdot v)
-    template<RealScalar FpType>
-    static FpType vec_norm(size_t size, complex<FpType> *v) {
-	FpType n = 0.0;
-	CUBLAS_CALL(cublas_nrm2(size, n, v));
-	return n;
+    static void scale_vec(int dev, size_t size, complex<FpType> *v, complex<FpType> s) {
+	CUBLAS_CALL(cublas_scal(dev, size, s, v));
     }
 
     // Compute res[i] = exp(c*v[i]) where res is a complex dim-by-1 matrix
@@ -766,7 +853,12 @@ public:
     // Initialize the vector with zero, ie. set v0[i] to 0.0 for all i.
     template<RealScalar FpType>
     static void zero_vec(VecSizeType<FpType> size, BufType<FpType> v) {
-	CUDA_CALL(cudaMemset(v.dev_ptr, 0, size * sizeof(complex<FpType>)));
+	assert(size == v.dev_dim * get_device_count());
+	for (int i = 0; i < get_device_count(); i++) {
+	    set_device(i);
+	    CUDA_CALL(cudaMemsetAsync(v.dev_ptrs[i], 0, v.dev_dim * sizeof(complex<FpType>)));
+	}
+	sync_devices();
     }
 
     // Initialize the vector to a Haar random state.
@@ -777,9 +869,15 @@ public:
     template<RealScalar FpType>
     static void copy_vec(VecSizeType<FpType> size, BufType<FpType> v0,
 			 ConstBufType<FpType> v1) {
-	CUDA_CALL(cudaMemcpy(v0.dev_ptr, v1.dev_ptr,
-			     size * sizeof(complex<FpType>),
-			     cudaMemcpyDeviceToDevice));
+	assert(size == v0.dev_dim * get_device_count());
+	assert(v0.dev_dim == v1.dev_dim);
+	for (int i = 0; i < get_device_count(); i++) {
+	    set_device(i);
+	    CUDA_CALL(cudaMemcpyAsync(v0.dev_ptrs[i], v1.dev_ptrs[i],
+				      v0.dev_dim * sizeof(complex<FpType>),
+				      cudaMemcpyDeviceToDevice));
+	}
+	sync_devices();
     }
 
     // Copy v1 into v0, converting double to float by rounding toward zero.
@@ -796,50 +894,85 @@ public:
     static void copy_vec(VecSizeType<FpType> size, BufType<FpType> res,
 			 const typename DevSumOps<FpType>::MatrixType &mat,
 			 ssize_t rowidx) {
-	CUDA_CALL(cudaMemcpy(res.dev_ptr, mat.dev_ptr + rowidx * size,
-			     sizeof(complex<FpType>) * size,
-			     cudaMemcpyDeviceToDevice));
+	assert(size == res.dev_dim * get_device_count());
+	for (int i = 0; i < get_device_count(); i++) {
+	    set_device(i);
+	    CUDA_CALL(cudaMemcpyAsync(res.dev_ptrs[i],
+				      mat.dev_ptr + rowidx * size + i * res.dev_dim,
+				      sizeof(complex<FpType>) * res.dev_dim,
+				      cudaMemcpyDeviceToDevice));
+	}
+	sync_devices();
     }
 
     // Compute v0 += v1. v0 and v1 are assumed to point to different buffers.
     template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
 			ConstBufType<FpType> v1) {
-	add_vec(size, v0.dev_ptr, v1.dev_ptr);
+	assert(size == v0.dev_dim * get_device_count());
+	assert(v0.dev_dim == v1.dev_dim);
+	for (int i = 0; i < get_device_count(); i++) {
+	    add_vec(i, v0.dev_dim, v0.dev_ptrs[i], v1.dev_ptrs[i]);
+	}
+	sync_devices();
     }
 
     // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
     template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> v0,
 			complex<FpType> s, ConstBufType<FpType> v1) {
-	add_vec(size, v0.dev_ptr, s, v1.dev_ptr);
+	assert(size == v0.dev_dim * get_device_count());
+	assert(v0.dev_dim == v1.dev_dim);
+	for (int i = 0; i < get_device_count(); i++) {
+	    add_vec(i, v0.dev_dim, v0.dev_ptrs[i], s, v1.dev_ptrs[i]);
+	}
+	sync_devices();
     }
 
     // Compute v0 += s * v1. v0 and v1 are assumed to point to different buffers.
     template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> v0, FpType s,
 			ConstBufType<FpType> v1) {
-	add_vec(size, v0.dev_ptr, s, v1.dev_ptr);
+	assert(size == v0.dev_dim * get_device_count());
+	assert(v0.dev_dim == v1.dev_dim);
+	for (int i = 0; i < get_device_count(); i++) {
+	    add_vec(i, v0.dev_dim, v0.dev_ptrs[i], s, v1.dev_ptrs[i]);
+	}
+	sync_devices();
     }
 
     // Compute res = v0 + v1. res is assumed to be different from both v0 and v1.
     template<RealScalar FpType>
     static void add_vec(VecSizeType<FpType> size, BufType<FpType> res,
 			ConstBufType<FpType> v0, ConstBufType<FpType> v1) {
-	add_vec(size, res.dev_ptr, v0.dev_ptr, v1.dev_ptr);
+	assert(size == v0.dev_dim * get_device_count());
+	assert(v0.dev_dim == v1.dev_dim);
+	assert(res.dev_dim == v1.dev_dim);
+	for (int i = 0; i < get_device_count(); i++) {
+	    add_vec(i, v0.dev_dim, res.dev_ptrs[i], v0.dev_ptrs[i], v1.dev_ptrs[i]);
+	}
+	sync_devices();
     }
 
     // Compute v *= s where s is a real scalar.
     template<RealScalar FpType>
     static void scale_vec(VecSizeType<FpType> size, BufType<FpType> v, FpType s) {
-	scale_vec(size, v.dev_ptr, s);
+	assert(size == v.dev_dim * get_device_count());
+	for (int i = 0; i < get_device_count(); i++) {
+	    scale_vec(i, v.dev_dim, v.dev_ptrs[i], s);
+	}
+	sync_devices();
     }
 
     // Compute v *= s where s is a complex scalar.
     template<RealScalar FpType>
     static void scale_vec(VecSizeType<FpType> size, BufType<FpType> v,
 			  complex<FpType> s) {
-	scale_vec(size, v.dev_ptr, s);
+	assert(size == v.dev_dim * get_device_count());
+	for (int i = 0; i < get_device_count(); i++) {
+	    scale_vec(i, v.dev_dim, v.dev_ptrs[i], s);
+	}
+	sync_devices();
     }
 
     // Compute the vector inner product of the complex vector v0 and v1.
@@ -847,8 +980,17 @@ public:
     template<RealScalar FpType>
     static complex<FpType> vec_prod(size_t size, ConstBufType<FpType> v0,
 				    ConstBufType<FpType> v1) {
-	complex<FpType> res = 0.0;
-	CUBLAS_CALL(cublas_dotc(size, res, v0.dev_ptr, v1.dev_ptr));
+	assert(size == v0.dev_dim * get_device_count());
+	assert(v0.dev_dim == v1.dev_dim);
+	std::vector<complex<FpType>> vres(get_device_count());
+	for (int i = 0; i < get_device_count(); i++) {
+	    CUBLAS_CALL(cublas_dotc(i, v0.dev_dim, vres[i], v0.dev_ptrs[i], v1.dev_ptrs[i]));
+	}
+	sync_devices();
+	complex<FpType> res{0.0};
+	for (int i = 0; i < get_device_count(); i++) {
+	    res += vres[i];
+	}
 	return res;
     }
 
@@ -856,7 +998,7 @@ public:
     // n = sqrt(<v|v>) = sqrt(v^\dagger \cdot v)
     template<RealScalar FpType>
     static FpType vec_norm(size_t size, ConstBufType<FpType> v) {
-	return vec_norm(size, v.dev_ptr);
+	return std::sqrt(vec_prod(size, v, v).real());
     }
 
     // Set the given matrix to the identity matrix.
@@ -872,8 +1014,10 @@ public:
 			ConstBufType<FpType> vec, bool adjoint = false) {
 	assert(dim == mat.rowdim);
 	assert(dim == mat.coldim);
-	CUBLAS_CALL(cublas_gemv(dim, dim, res.dev_ptr, {1,0}, mat.dev_ptr,
-				vec.dev_ptr, {}, adjoint));
+	assert(get_device_count() == 1);
+	CUBLAS_CALL(cublas_gemv(dim, dim, res.dev_ptrs[0], {1,0}, mat.dev_ptr,
+				vec.dev_ptrs[0], {}, adjoint));
+	sync_device(0);
     }
 
     // Compute the matrix multiplication res = mat0 * mat1, where mat0 and
@@ -890,6 +1034,7 @@ public:
 	CUBLAS_CALL(cublas_gemm(res.rowdim, mat0.coldim, mat1.coldim,
 				res.dev_ptr, {1,0}, mat0.dev_ptr, mat1.dev_ptr,
 				{}, adjoint0, adjoint1));
+	sync_device(0);
     }
 
     // Compute the trace of the given matrix.
@@ -906,10 +1051,55 @@ public:
 template<RealScalar FpType>
 inline void GPUImpl::init_random(VecSizeType<FpType> size, BufType<FpType> v) {
     // Generate 2*size random numbers
-    CURAND_CALL(gen_norm((FpType *)v.dev_ptr, size_t(size)*2));
+    assert(size == v.dev_dim * get_device_count());
+    for (int i = 0; i < get_device_count(); i++) {
+	CURAND_CALL(gen_norm(i, (FpType *)v.dev_ptrs[i], v.dev_dim * 2));
+    }
+    sync_devices();
     // Normalize the resulting vector
     FpType c = 1/vec_norm(size, v);
     scale_vec(size, v, c);
+}
+
+template <RealScalar FpType>
+inline void DevSumOps<FpType>::upload(typename SpinOp<FpType>::IndexType len) const {
+    if (dev_ops.size() || dev_mat) {
+	return;
+    }
+    if (this->ops.size() < (1ULL << len)) {
+	dev_ops.resize(GPUImpl::get_device_count());
+	auto size = this->ops.size() * sizeof(SpinOp<FpType>);
+	for (int i = 0; i < GPUImpl::get_device_count(); i++) {
+	    GPUImpl::set_device(i);
+	    cuda_alloc(dev_ops[i], size);
+	}
+	for (int i = 0; i < GPUImpl::get_device_count(); i++) {
+	    CUDA_CALL(cudaMemcpyAsync(dev_ops[i], this->ops.data(),
+				      size, cudaMemcpyHostToDevice));
+	}
+	GPUImpl::sync_devices();
+    } else {
+	get_matrix(len);
+    }
+}
+
+template <RealScalar FpType>
+inline void DevSumOps<FpType>::release() const {
+    // We must call the parent class release() function.
+    HostSumOps<FpType>::release();
+    mini_release();
+    if (dev_ops.size()) {
+	for (int i = 0; i < GPUImpl::get_device_count(); i++) {
+	    cudaFree(dev_ops[i]);
+	    dev_ops[i] = nullptr;
+	}
+    }
+    dev_mat.reset(nullptr);
+    host_eigenvals.resize(0);
+    if (dev_eigenvals) {
+	cudaFree(dev_eigenvals);
+	dev_eigenvals = nullptr;
+    }
 }
 
 template<RealScalar FpType>
@@ -917,6 +1107,7 @@ inline typename DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::Ide
     ssize_t rowdim, ssize_t coldim) {
     MatrixType id(rowdim, coldim);
     GPUImpl::eye<FpType>(id);
+    GPUImpl::sync_device(0);
     return id;
 }
 
@@ -926,7 +1117,8 @@ inline typename DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::op
     if (rowdim != other.rowdim || coldim != other.coldim) {
 	ThrowException(InvalidArgument, "matrix dimensions", "must match");
     }
-    GPUImpl::add_vec<FpType>(rowdim * coldim, dev_ptr, other.dev_ptr);
+    GPUImpl::add_vec<FpType>(0, rowdim * coldim, dev_ptr, other.dev_ptr);
+    GPUImpl::sync_device(0);
     return *this;
 }
 
@@ -936,7 +1128,8 @@ inline typename DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::op
     if (rowdim != other.rowdim || coldim != other.coldim) {
 	ThrowException(InvalidArgument, "matrix dimensions", "must match");
     }
-    GPUImpl::add_vec<FpType>(rowdim * coldim, dev_ptr, {-1,0}, other.dev_ptr);
+    GPUImpl::add_vec<FpType>(0, rowdim * coldim, dev_ptr, {-1,0}, other.dev_ptr);
+    GPUImpl::sync_device(0);
     return *this;
 }
 
@@ -952,13 +1145,15 @@ inline typename DevSumOps<FpType>::MatrixType DevSumOps<FpType>::MatrixType::ope
     }
     MatrixType res(rowdim, other.coldim);
     GPUImpl::mat_mul<FpType>(res, *this, other);
+    GPUImpl::sync_device(0);
     return res;
 }
 
 template<RealScalar FpType>
 inline typename DevSumOps<FpType>::MatrixType &DevSumOps<FpType>::MatrixType::operator*=(
     complex<FpType> c) {
-    GPUImpl::scale_vec<FpType>(rowdim * coldim, dev_ptr, c);
+    GPUImpl::scale_vec<FpType>(0, rowdim * coldim, dev_ptr, c);
+    GPUImpl::sync_device(0);
     return *this;
 }
 
@@ -973,7 +1168,10 @@ inline complex<FpType> DevSumOps<FpType>::MatrixType::trace() const {
 
 template<RealScalar FpType>
 inline FpType DevSumOps<FpType>::MatrixType::mat_norm() const {
-    return GPUImpl::vec_norm(rowdim * coldim, dev_ptr);
+    FpType n = 0.0;
+    CUBLAS_CALL(GPUImpl::cublas_nrm2(rowdim * coldim, n, dev_ptr));
+    GPUImpl::sync_device(0);
+    return n;
 }
 
 template<RealScalar FpType>
@@ -983,6 +1181,7 @@ inline typename DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensyste
 	if (dev_eigenvals) {
 	    cudaFree(dev_eigenvals);
 	}
+	GPUImpl::set_device(0);
 	cuda_alloc(dev_eigenvals, dim * sizeof(FpType));
 	assert(dev_eigenvals);
 	eigenvecs = std::make_unique<MatrixType>(get_matrix(len));
@@ -1017,7 +1216,7 @@ inline typename DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensyste
 					      eigenvecs->dev_ptr, dev_eigenvals,
 					      d_work, dworksz, l_work.get(),
 					      lworksz, d_info));
-	CUDA_CALL(cudaDeviceSynchronize());
+	GPUImpl::sync_device(0);
 
 	// Copy the status information from device to host and check if is an error
 	int info{};
@@ -1044,7 +1243,7 @@ inline typename DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensyste
 
 template<RealScalar FpType>
 inline typename DevSumOps<FpType>::MatrixType DevSumOps<FpType>::_matexp(complex<FpType> c,
-								int len) const {
+									 int len) const {
     get_eigensystem(len);
     assert(dev_eigenvals);
     assert(host_eigenvals.rows() == (1LL << len));
@@ -1059,6 +1258,16 @@ inline typename DevSumOps<FpType>::MatrixType DevSumOps<FpType>::_matexp(complex
     MatrixType res(dim, dim);
     GPUImpl::mat_mul<FpType>(res, tmp, *eigenvecs, false, true);
     return res;
+}
+
+
+template<RealScalar FpType>
+inline std::ostream &operator<<(std::ostream &os, const DevSumOps<FpType> &s) {
+    os << static_cast<const HostSumOps<FpType> &>(s) << " devptrs";
+    for (int i = 0; i < GPUImpl::get_device_count(); i++) {
+	os << " " << s.dev_ops[i];
+    }
+    return os;
 }
 
 using DefImpl = GPUImpl;
