@@ -38,18 +38,21 @@ even get me started on Andromeda).
    allocation overhead. C++11 move semantics is implemented to avoid unnecessary copies.
 3. Can switch between CPU and GPU backends at runtime --- in fact you can run both at
    the same time, maximizing the utility of computational resources.
-4. Supports both single precision floating point (FP32) and double precision (FP64), and
+4. Supports single-node multi-GPU computing. This requires GPU peer-to-peer access being
+   available.
+5. Supports AMDGPU with ROCm. This requires at least ROCm 6.2.0.
+6. Supports both single precision floating point (FP32) and double precision (FP64), and
    can also be switched at runtime. This allows you to run simulations on consumer-grade
    nVidia cards, as they usually have reduced FP64 performance but decent FP32 performance.
-5. Easy to use. No need to build or install as we are a header-only library for the host
+7. Easy to use. No need to build or install as we are a header-only library for the host
    (ie. CPU) code. There is one source file for the CUDA kernels which you simply link
    with after you've built the host code (you can also do it in one single step, by using
    `nvcc` to build both the host code and CUDA kernels).
-6. No external dependency apart from eigen3 (which is a header-only library as well and
+8. No external dependency apart from eigen3 (which is a header-only library as well and
    requires no configuring or building). Simply install a C++ compiler (and CUDA if you
    want to use GPU) and call `g++` or `nvcc`. You don't have to deal with the mess that
    is C++ package management at all.
-7. In addition to Krylov, you can also use what we call "exact diagonalization" (this
+9. In addition to Krylov, you can also use what we call "exact diagonalization" (this
    term may mean different things to different people, but we stick with the following
    sense) to compute exp(-iHt), by finding the eigensystem of H and exponentiating the
    eigenvalues. Since we need to store the explicit matrix of the Hamiltonian in this
@@ -73,7 +76,7 @@ the `.cu` file at all. If you are going to use GPUs, simply link your host code 
 Have a look at the sample programs under the `examples` folder, as well as the `build.sh`
 script for the compiler directives. To build all the sample programs, issue
 ```
-./build.sh [opt|intel|gpu|gpu-icpx]
+./build.sh [opt|intel|nvgpu|nvgpu-icpx|amdgpu] [multi]
 ```
 under the `examples` folder. The default build target is debug build which has extra checks
 for program correctness. It is recommended that you test the debug builds first when writing
@@ -81,12 +84,17 @@ new programs using REAPERS. If you specify `opt`, then optimized executables wil
 If you specify `intel`, the build script will generate Intel AVX-enabled executables using
 the Intel LLVM-based C++ compiler `icpx`, which must be available in the `PATH`. This is in
 general the fastest CPU-only builds (assuming you are using Intel CPUs). If you specify
-`gpu`, the build script will use the CUDA `nvcc` to build both the CUDA kernels as well as
-the host code (ie. CPU-side of the programs). If you specify `gpu-icpx`, the host code will
+`nvgpu`, the build script will use the CUDA `nvcc` to build both the CUDA kernels as well as
+the host code (ie. CPU-side of the programs). If you specify `nvgpu-icpx`, the host code will
 instead be compiled using the Intel LLVM C++ compiler and this is generally speaking a lot
 faster than stock GCC (which `nvcc` calls by default). Optimizations are enabled for both
 the host code and the CUDA kernels. Note if you installed eigen3 or cuda in a different
 place, you need to modify the `EIGEN_INC` and `CUDA_INC` paths in `build.sh`.
+
+For AMD ROCm, you can specify `amdgpu` which will invoke `hipcc` to build the programs. For
+both nVidia and AMD platforms, you can specify an additional paramater `multi` which will
+enable multi-GPU support. Multi-GPU support has a small overhead on single GPU systems, so
+it is disabled by default.
 
 Once you have built the sample programs, try running them. The SYK program will compute the
 Green's functions and OTOCs of dense or sparse SYK models. Use `./syk --help` to see the list

@@ -12,6 +12,9 @@ lindblad
 *-gpu
 *-intel
 *-gpu-icpx
+*-nvgpu
+*-amdgpu
+*-multi
 Log*
 Avg*
 Ent*

@@ -131,19 +131,19 @@ class CudaError : public Exception {
 public:
     CudaError(const char *f, int l, const char *fn, cudaError_t code) : Exception(f, l, fn) {
 	std::stringstream ss;
-	ss << " CUDA runtime error, code " << code << " ("
+	ss << " GPU runtime error, code " << code << " ("
 	   << cudaGetErrorString(code) << ").";
 	msg += ss.str();
     }
 };
 #endif
 
-// Exception class thrown when there is no CUDA device available
+// Exception class thrown when there is no GPU device available
 class NoGpuDevice : public Exception {
 public:
     NoGpuDevice(const char *f, int l, const char *fn)
 	: Exception(f, l, fn) {
-	msg += "No CUDA device available";
+	msg += "No GPU device available";
     }
 };
 
@@ -158,13 +158,13 @@ public:
     }
 };
 
-// Exception class thrown when a CUDA device memory allocation has failed
+// Exception class thrown when a GPU device memory allocation has failed
 class DevOutOfMem : public Exception {
 public:
     DevOutOfMem(const char *f, int l, const char *fn, size_t size)
 	: Exception(f, l, fn) {
 	std::stringstream ss;
-	ss << "Failed to allocate " << size << " bytes on CUDA device.";
+	ss << "Failed to allocate " << size << " bytes on GPU device.";
 	msg += ss.str();
     }
 };
