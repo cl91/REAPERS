@@ -29,6 +29,7 @@
 #define cudaHostAlloc hipHostMalloc
 #define cudaHostAllocDefault hipHostMallocDefault
 #define cudaMalloc hipMalloc
+#define cudaMemset hipMemset
 #define cudaMemcpy hipMemcpy
 #define cudaMemcpyAsync hipMemcpyAsync
 #define cudaMemcpyDeviceToHost hipMemcpyDeviceToHost
@@ -98,16 +99,48 @@
 /* TODO: When hipSOLVER supports the DnX interface, change the following
  * accordingly. For now we use the old syevd interface (deprecated in CUDA 12).
  */
-#define cusolverDnParams_t int
-#define cusolverDnCreateParams(x)
-#define cusolverDnDestroyParams(x)
+#define hipsolverDnParams_t int
+#define cusolverDnCreateParams(x) (CUSOLVER_STATUS_SUCCESS)
+#define cusolverDnDestroyParams(x) (CUSOLVER_STATUS_SUCCESS)
 
+template<typename Ty>
 inline cusolverStatus_t
-cusolverDnXsyevd(cusolverDnHandle_t hnd, cusolverEigMode_t jobz,
-                 cublasFillMode_t uplo, size_t dim, int ty,
-                 complex<float> *mat, size_t rdim, int rty, float *vals,
-                 void *d_work, int dworksz, void *l_work, int lworksz,
-                 int *d_info)
+cusolverDnXsyevd_bufferSize(cusolverDnHandle_t hnd, cusolverDnParams_t params,
+			    cusolverEigMode_t jobz, cublasFillMode_t uplo,
+			    size_t dim, int ty, Ty *mat, size_t rdim, int rty, float *vals,
+			    int rrty, size_t *dworksz, size_t *lworksz)
 {
+    return CUSOLVER_STATUS_SUCCESS;
 }
 
+template<typename Ty>
+inline cusolverStatus_t
+cusolverDnXsyevd_bufferSize(cusolverDnHandle_t hnd, cusolverDnParams_t params,
+			    cusolverEigMode_t jobz, cublasFillMode_t uplo,
+			    size_t dim, int ty, Ty *mat, size_t rdim, int rty, double *vals,
+			    int rrty, size_t *dworksz, size_t *lworksz)
+{
+    return CUSOLVER_STATUS_SUCCESS;
+}
+
+template<typename Ty>
+inline cusolverStatus_t
+cusolverDnXsyevd(cusolverDnHandle_t hnd, cusolverDnParams_t params,
+		 cusolverEigMode_t jobz, cublasFillMode_t uplo,
+		 size_t dim, int ty, Ty *mat, size_t rdim, int rty, float *vals,
+                 int rrty, void *d_work, int dworksz, void *l_work, int lworksz,
+                 int *d_info)
+{
+    return CUSOLVER_STATUS_SUCCESS;
+}
+
+template<typename Ty>
+inline cusolverStatus_t
+cusolverDnXsyevd(cusolverDnHandle_t hnd, cusolverDnParams_t params,
+		 cusolverEigMode_t jobz, cublasFillMode_t uplo,
+		 size_t dim, int ty, Ty *mat, size_t rdim, int rty, double *vals,
+                 int rrty, void *d_work, int dworksz, void *l_work, int lworksz,
+                 int *d_info)
+{
+    return CUSOLVER_STATUS_SUCCESS;
+}
