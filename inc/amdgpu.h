@@ -30,6 +30,7 @@
 #define cudaHostAllocDefault hipHostMallocDefault
 #define cudaMalloc hipMalloc
 #define cudaMemset hipMemset
+#define cudaMemsetAsync hipMemsetAsync
 #define cudaMemcpy hipMemcpy
 #define cudaMemcpyAsync hipMemcpyAsync
 #define cudaMemcpyDeviceToHost hipMemcpyDeviceToHost
