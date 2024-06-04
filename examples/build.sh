@@ -62,7 +62,7 @@ if (( $MULTI_GPU )); then
 fi
 # You can also specify -DMAX_NUM_FERMIONS=<N> to hard-code the maximum number of fermions.
 # This might make things a little faster, but probably won't matter much.
-NVCC="nvcc -forward-unknown-to-host-compiler $COMMONOPTS -Wno-unknown-pragmas -lcublas -lcusolver -lcurand ../src/krnl.cu -march=native -fopenmp $LINKLIBS -arch sm_80"
+NVCC="nvcc -forward-unknown-to-host-compiler $COMMONOPTS -Wno-unknown-pragmas -diag-suppress 68 -lcublas -lcusolver -lcurand ../src/krnl.cu -march=native -fopenmp $LINKLIBS -arch sm_80"
 HIPCC="hipcc $COMMONOPTS -lhipblas -lhipsolver -lhiprand ../src/krnl.cu -march=native -fopenmp $LINKLIBS"
 CXX="c++ -DREAPERS_NOGPU $COMMONOPTS -march=native -fopenmp $LINKLIBS"
 ICXX="icpx -DREAPERS_NOGPU $COMMONOPTS -xhost -fiopenmp -Wno-tautological-constant-compare -Wno-unused-but-set-variable $LINKLIBS"
