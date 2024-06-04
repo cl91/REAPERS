@@ -1032,6 +1032,7 @@ inline typename DevSumOps<FpType>::EigenSystem DevSumOps<FpType>::get_eigensyste
 			     sizeof(FpType) * dim, cudaMemcpyDeviceToHost));
 	cudaFree(d_info);
 	cudaFree(d_work);
+	CUSOLVER_CALL(cusolverDnDestroyParams(params));
     }
     assert(dev_eigenvals);
     assert(host_eigenvals.rows() == (ssize_t)dim);
