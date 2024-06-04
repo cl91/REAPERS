@@ -94,3 +94,20 @@
 #define cusolverDnCreate hipsolverDnCreate
 #define CUSOLVER_STATUS_SUCCESS HIPSOLVER_STATUS_SUCCESS
 #define CUSOLVER_EIG_MODE_VECTOR HIPSOLVER_EIG_MODE_VECTOR
+
+/* TODO: When hipSOLVER supports the DnX interface, change the following
+ * accordingly. For now we use the old syevd interface (deprecated in CUDA 12).
+ */
+#define cusolverDnParams_t int
+#define cusolverDnCreateParams(x)
+#define cusolverDnDestroyParams(x)
+
+inline cusolverStatus_t
+cusolverDnXsyevd(cusolverDnHandle_t hnd, cusolverEigMode_t jobz,
+                 cublasFillMode_t uplo, size_t dim, int ty,
+                 complex<float> *mat, size_t rdim, int rty, float *vals,
+                 void *d_work, int dworksz, void *l_work, int lworksz,
+                 int *d_info)
+{
+}
+
