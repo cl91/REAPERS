@@ -1066,7 +1066,7 @@ inline void DevSumOps<FpType>::upload(typename SpinOp<FpType>::IndexType len) co
     if (dev_ops.size() || dev_mat) {
 	return;
     }
-    if (this->ops.size() < (1ULL << len)) {
+    if (this->ops.size() < (1ULL << len) || GPUImpl::get_device_count() > 1) {
 	dev_ops.resize(GPUImpl::get_device_count());
 	auto size = this->ops.size() * sizeof(SpinOp<FpType>);
 	for (int i = 0; i < GPUImpl::get_device_count(); i++) {
@@ -1079,6 +1079,7 @@ inline void DevSumOps<FpType>::upload(typename SpinOp<FpType>::IndexType len) co
 	}
 	GPUImpl::sync_devices();
     } else {
+	assert(GPUImpl::get_device_count() == 1);
 	get_matrix(len);
     }
 }
