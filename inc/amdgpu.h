@@ -10,6 +10,8 @@
 #include <STOP_NOW_AND_FIX_YOUR_DAMN_CODE>
 #endif
 
+#define HIPBLAS_V2
+
 #include <hip/hip_runtime.h>
 #include <hipblas/hipblas.h>
 #include <hiprand/hiprand.h>
@@ -52,20 +54,24 @@
 #define cublasHandle_t hipblasHandle_t
 #define cublasStatus_t hipblasStatus_t
 #define cublasCreate hipblasCreate
-#define cublasCaxpy_64 hipblasCaxpy_v2_64
-#define cublasSscal_64 hipblasSscal_v2_64
-#define cublasCscal_64 hipblasCscal_v2_64
-#define cublasCdotc_64 hipblasCdotc_v2_64
-#define cublasScnrm2_64 hipblasScnrm2_v2_64
-#define cublasCgemv_64 hipblasCgemv_v2_64
-#define cublasCgemm_64 hipblasCgemm_v2_64
-#define cublasZaxpy_64 hipblasZaxpy_v2_64
-#define cublasDscal_64 hipblasDscal_v2_64
-#define cublasZscal_64 hipblasZscal_v2_64
-#define cublasZdotc_64 hipblasZdotc_v2_64
-#define cublasDznrm2_64 hipblasDznrm2_v2_64
-#define cublasZgemv_64 hipblasZgemv_v2_64
-#define cublasZgemm_64 hipblasZgemm_v2_64
+#define cublasCaxpy_64 hipblasCaxpy_64
+#define cublasSscal_64 hipblasSscal_64
+#define cublasCscal_64 hipblasCscal_64
+#define cublasCdotc_64 hipblasCdotc_64
+#define cublasScnrm2_64 hipblasScnrm2_64
+/* TODO: When hipBLAS supports 64-bit interfaces for level 2 APIs,
+ * change the following two functions accordingly. */
+#define cublasCgemv_64 hipblasCgemv
+#define cublasCgemm_64 hipblasCgemm
+#define cublasZaxpy_64 hipblasZaxpy_64
+#define cublasDscal_64 hipblasDscal_64
+#define cublasZscal_64 hipblasZscal_64
+#define cublasZdotc_64 hipblasZdotc_64
+#define cublasDznrm2_64 hipblasDznrm2_64
+/* TODO: When hipBLAS supports 64-bit interfaces for level 2 APIs,
+ * change the following two functions accordingly. */
+#define cublasZgemv_64 hipblasZgemv
+#define cublasZgemm_64 hipblasZgemm
 #define cublasFillMode_t hipblasFillMode_t
 #define CUBLAS_STATUS_SUCCESS HIPBLAS_STATUS_SUCCESS
 #define CUBLAS_OP_N HIPBLAS_OP_N
@@ -85,5 +91,6 @@
 #define cusolverStatus_t hipsolverStatus_t
 #define cusolverDnParams_t hipsolverDnParams_t
 #define cusolverEigMode_t hipsolverEigMode_t
+#define cusolverDnCreate hipsolverDnCreate
 #define CUSOLVER_STATUS_SUCCESS HIPSOLVER_STATUS_SUCCESS
 #define CUSOLVER_EIG_MODE_VECTOR HIPSOLVER_EIG_MODE_VECTOR
