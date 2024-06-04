@@ -31,26 +31,33 @@ Revision History:
 #include <vector>
 #include <concepts>
 
+#define _REAPERS_H_
+
 #ifdef REAPERS_NOGPU
 #define DEVHOST
+#else
+#define DEVHOST __device__ __host__
+#ifdef __HIPCC__
+#include "amdgpu.h"
 #else
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 #include <cusolverDn.h>
 #include <curand.h>
 #include <cuda/std/complex>
-#define DEVHOST __device__ __host__
 #pragma nv_diag_suppress 20012
 #pragma nv_diag_suppress 20013
 #pragma nv_diag_suppress 20015
 #pragma nv_diag_suppress 20236
-#endif
+#endif	// __HIPCC__
+#endif	// REAPERS_NOGPU
 
+// We only use Eigen3 for host matrix operations so disable CUDA and HIP support for Eigen3
+#define EIGEN_NO_CUDA
+#define EIGEN_NO_HIP
 #include <Eigen/Eigen>
 #include <Eigen/Eigenvalues>
 #include <unsupported/Eigen/MatrixFunctions>
-
-#define _REAPERS_H_
 
 namespace REAPERS {
 
@@ -67,7 +74,7 @@ namespace REAPERS {
     using DefFpType = float;
     #endif
 
-    #ifdef REAPERS_NOGPU
+    #if defined(REAPERS_NOGPU) || defined(__HIPCC__)
     template<RealScalar FpType = DefFpType>
     using complex = std::complex<FpType>;
     #else
