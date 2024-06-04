@@ -77,7 +77,7 @@ __device__ __inline cuDoubleComplex cmul(cuDoubleComplex z1,
     return CudaComplex<double>::cuCmul(z1, z2);
 }
 
-#ifdef REAPERS_NO_MULTIGPU
+#ifndef REAPERS_MULTIGPU
 template<RealScalar FpType>
 __global__ static void krnl_apply_ops(CudaComplexPtr<FpType> res,
 				      SpinOp<FpType> *ops, int numops,
@@ -206,7 +206,7 @@ void GPUImpl::add_vec(int dev, size_t size, complex<FpType> *res,
 					   (CudaComplexConstPtr<FpType>)v1);
 }
 
-#ifndef REAPERS_NO_MULTIGPU
+#ifdef REAPERS_MULTIGPU
 static int logint(int n) {
     int l = 0;
     while (!(n & 1)) {
@@ -230,7 +230,7 @@ void GPUImpl::apply_ops(typename SpinOp<FpType>::IndexType len, BufType<FpType> 
     if (ops.dev_ops.size()) {
 	int blocksize, gridsize;
 	get_block_grid_size(res.dev_dim, blocksize, gridsize);
-#ifdef REAPERS_NO_MULTIGPU
+#ifndef REAPERS_MULTIGPU
 	krnl_apply_ops<<<gridsize, blocksize>>>((CudaComplexPtr<FpType>)res.dev_ptrs[0],
 						(SpinOp<FpType> *)ops.dev_ops[0],
 						ops.ops.size(),

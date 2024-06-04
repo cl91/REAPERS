@@ -65,7 +65,7 @@ Revision History:
 	ThrowException(DevOutOfMem, (sz));	\
     }
 
-#ifdef REAPERS_NO_MULTIGPU
+#ifndef REAPERS_MULTIGPU
 #define REAPERS_MAX_GPU_COUNT (1)
 #elif !defined(REAPERS_MAX_GPU_COUNT)
 #define REAPERS_MAX_GPU_COUNT (8)
@@ -502,7 +502,7 @@ class GPUImpl {
 	size_t vram_total_size;
 	size_t vram_free_size;
 	GPUContext() {
-#ifdef REAPERS_NO_MULTIGPU
+#ifndef REAPERS_MULTIGPU
 	    num_dev = 1;
 #else
 	    CUDA_CALL(cudaGetDeviceCount(&num_dev));
@@ -620,7 +620,7 @@ public:
 
 private:
     static void set_device(int i) {
-#ifndef REAPERS_NO_MULTIGPU
+#ifdef REAPERS_MULTIGPU
 	CUDA_CALL(cudaSetDevice(i));
 #endif
     }

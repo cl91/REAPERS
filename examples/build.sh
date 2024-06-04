@@ -3,7 +3,7 @@ CUDA_INC=/opt/cuda/include
 
 OPT=0
 GPU=0
-SINGLE_GPU=0
+MULTI_GPU=0
 INTEL=0
 buildty="debug"
 
@@ -29,10 +29,9 @@ if [[ $1 == "gpu-icpx" ]]; then
     buildty="gpu-icpx"
 fi
 
-if [[ $1 == "single-gpu" ]]; then
-    GPU=1
-    SINGLE_GPU=1
-    buildty="single-gpu"
+if [[ $2 == "multi" ]]; then
+    MULTI_GPU=1
+    buildty+="-multi"
 fi
 
 # Switch current directory to where this script is located.
@@ -47,8 +46,8 @@ if (( $OPT )) || (( $INTEL )) || (( $GPU )) || (( $GPU_ICPX )); then
 else
     COMMONOPTS+=" $DBGOPTS"
 fi
-if (( $SINGLE_GPU )); then
-    COMMONOPTS+=" -DREAPERS_NO_MULTIGPU"
+if (( $MULTI_GPU )); then
+    COMMONOPTS+=" -DREAPERS_MULTIGPU"
 fi
 # You can also specify -DMAX_NUM_FERMIONS=<N> to hard-code the maximum number of fermions.
 # This might make things a little faster, but probably won't matter much.
