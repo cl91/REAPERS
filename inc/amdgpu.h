@@ -17,11 +17,13 @@
 
 #define cudaDeviceSynchronize hipDeviceSynchronize
 #define cudaDeviceCanAccessPeer hipDeviceCanAccessPeer
+#define cudaDeviceEnablePeerAccess hipDeviceEnablePeerAccess
 #define cudaFree hipFree
 #define cudaFreeHost hipHostFree
 #define cudaGetDevice hipGetDevice
 #define cudaGetDeviceCount hipGetDeviceCount
 #define cudaGetLastError hipGetLastError
+#define cudaPeekAtLastError hipPeekAtLastError
 #define cudaHostAlloc hipHostMalloc
 #define cudaHostAllocDefault hipHostMallocDefault
 #define cudaMalloc hipMalloc
@@ -30,6 +32,7 @@
 #define cudaMemcpyDeviceToHost hipMemcpyDeviceToHost
 #define cudaMemcpyHostToDevice hipMemcpyHostToDevice
 #define cudaMemcpyDeviceToDevice hipMemcpyDeviceToDevice
+#define cudaMemGetInfo hipMemGetInfo
 #define cudaSetDevice hipSetDevice
 #define cudaGetErrorName hipGetErrorName
 #define cudaGetErrorString hipGetErrorString
@@ -65,15 +68,22 @@
 #define cublasZgemm_64 hipblasZgemm_v2_64
 #define cublasFillMode_t hipblasFillMode_t
 #define CUBLAS_STATUS_SUCCESS HIPBLAS_STATUS_SUCCESS
+#define CUBLAS_OP_N HIPBLAS_OP_N
+#define CUBLAS_OP_C HIPBLAS_OP_C
+#define CUBLAS_FILL_MODE_LOWER HIPBLAS_FILL_MODE_LOWER
 
 #define curandGenerator_t hiprandGenerator_t
 #define curandStatus_t hiprandStatus_t
 #define curandSetPseudoRandomGeneratorSeed hiprandSetPseudoRandomGeneratorSeed
 #define curandGenerateNormal hiprandGenerateNormal
 #define curandGenerateNormalDouble hiprandGenerateNormalDouble
+#define curandCreateGenerator hiprandCreateGenerator
 #define CURAND_STATUS_SUCCESS HIPRAND_STATUS_SUCCESS
+#define CURAND_RNG_PSEUDO_DEFAULT HIPRAND_RNG_PSEUDO_DEFAULT
 
 #define cusolverDnHandle_t hipsolverDnHandle_t
 #define cusolverStatus_t hipsolverStatus_t
 #define cusolverDnParams_t hipsolverDnParams_t
 #define cusolverEigMode_t hipsolverEigMode_t
+#define CUSOLVER_STATUS_SUCCESS HIPSOLVER_STATUS_SUCCESS
+#define CUSOLVER_EIG_MODE_VECTOR HIPSOLVER_EIG_MODE_VECTOR
