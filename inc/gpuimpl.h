@@ -1094,6 +1094,7 @@ inline void DevSumOps<FpType>::release() const {
 	    cudaFree(dev_ops[i]);
 	    dev_ops[i] = nullptr;
 	}
+	dev_ops.resize(0);
     }
     dev_mat.reset(nullptr);
     host_eigenvals.resize(0);
