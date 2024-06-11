@@ -168,7 +168,7 @@ public:
     // tracing over the n-point operator. In both cases results will be written
     // to vector v (after normalizing them by dividing by v[0]) as well as file
     // outf, and accumulated into sum.
-    void eval(const SYK<FpType> &syk, const HamOp<FpType> &ham,
+    void eval(const SYK<FpType> &syk, HamOp<FpType> &ham,
 	      std::unique_ptr<State<FpType>> &s0,
 	      std::vector<complex<FpType>> &v, std::ofstream &outf,
 	      std::vector<complex<FpType>> &sum, Logger &logger) {
@@ -190,6 +190,10 @@ public:
 	    }
 	} else {
 	    assert(s0);
+	    State<FpType> s1(args.N/2-1);
+	    auto gnd = s1.template ground_state<Krylov>(ham.LL, args.krylov_dim, (FpType)0.1);
+	    ham.LL += (-gnd) * SpinOp<FpType>::identity();
+	    ham.RR += (-gnd) * SpinOp<FpType>::identity();
 	    pre_evolve(ham.LL, *s0, args.beta);
 	    s0->gc();
 	    std::unique_ptr<State<FpType,CPUImpl>> hostst;
