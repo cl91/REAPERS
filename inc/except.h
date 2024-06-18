@@ -125,6 +125,7 @@ public:
     }
 };
 
+#ifndef REAPERS_NOGPU
 // Exception class thrown when a runtume error has occured
 class CudaError : public Exception {
 public:
@@ -135,6 +136,7 @@ public:
 	msg += ss.str();
     }
 };
+#endif
 
 // Exception class thrown when there is no CUDA device available
 class NoGpuDevice : public Exception {
