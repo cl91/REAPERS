@@ -67,7 +67,7 @@ HIPCC="hipcc $COMMONOPTS -lhipblas -lhipsolver -lhiprand ../src/krnl.cu -march=n
 CXX="c++ -DREAPERS_NOGPU $COMMONOPTS -march=native -fopenmp $LINKLIBS"
 ICXX="icpx -DREAPERS_NOGPU $COMMONOPTS -xhost -fiopenmp -Wno-tautological-constant-compare -Wno-unused-but-set-variable $LINKLIBS"
 ICXX_BUILD="icpx $COMMONOPTS -fPIE -xhost -fiopenmp -Wno-tautological-constant-compare -Wno-unused-but-set-variable -Wno-unknown-pragmas -I/opt/cuda/include"
-if (( $GPU_ICPX )); then
+if (( $NVGPU_ICPX )); then
     ICXX_LIB_PATH="$(dirname $(which icpx))/../compiler/lib/intel64_lin"
     INTEL_LIBS="irc iomp5 imf svml"
     NVCC_ICXX_OPTS=""
