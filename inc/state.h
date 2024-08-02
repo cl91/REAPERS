@@ -199,7 +199,7 @@ public:
     }
 
     auto operator[](IndexType i) const { assert(len); return buf()[i]; }
-    auto operator[](IndexType i) { assert(len); return buf()[i]; }
+    typename Impl::template ElemRefType<FpType> operator[](IndexType i) { assert(len); return buf()[i]; }
 
     // We must repeat the non-template operator= definition since the template
     // version below does not cover the non-template version (this is similar
@@ -535,7 +535,7 @@ struct BlockState : BlockVec<State<FpType,Impl>> {
 
     // For the non-const access operator we will have to throw if any of
     // the parity blocks is undefined.
-    auto operator[](size_t i) {
+    typename Impl::template ElemRefType<FpType> operator[](size_t i) {
 	assert(!this->nullL && !this->nullR);
 	if (this->nullL || this->nullR) {
 	    ThrowException(InvalidArgument, "Both parity blocks must be defined.");
