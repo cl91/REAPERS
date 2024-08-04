@@ -409,6 +409,7 @@ class GPUImpl {
 	DeviceVec(const DeviceVec &) = delete;
 	DeviceVec &operator=(const DeviceVec &) = delete;
 	DeviceVec &operator=(DeviceVec &&rhs) = delete;
+    public:
 	class ElemRefType {
 	    DeviceVec &vec;
 	    size_t idx;
@@ -422,7 +423,6 @@ class GPUImpl {
 		return *this;
 	    }
 	};
-    public:
 	DeviceVec(size_t dim) : dev_ptrs(GPUImpl::get_device_count()),
 				dev_dim(dim / GPUImpl::get_device_count()) {
 	    for (int i = 0; i < GPUImpl::get_device_count(); i++) {
