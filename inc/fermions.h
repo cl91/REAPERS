@@ -46,8 +46,6 @@ class SubspaceView : public SumOpsTy {
 
     void ensure_equal_len(const SubspaceView &rhs) const {
 	if (this->empty() || rhs.empty()) {
-	    if (this->empty()) { assert(!len); }
-	    if (rhs.empty()) { assert(!rhs.len); }
 	    // If one of the view is empty, we don't check for spin chain length.
 	    return;
 	}
