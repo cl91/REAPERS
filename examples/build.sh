@@ -45,8 +45,8 @@ cd "$(dirname "$0")"
 GITHASH=$(git show -s --format="%h (%ci)" HEAD)
 COMMONOPTS="-std=c++20 -Wall -Wno-uninitialized -I${EIGEN_INC} -I../inc"
 LINKLIBS="-lboost_program_options"
-DBGOPTS="-DREAPERS_DEBUG -g -G"
-NDBGOPTS="-DNDEBUG -O3 -ffast-math -mtune=native"
+DBGOPTS="-DREAPERS_DEBUG -g"
+NDBGOPTS="-DNDEBUG -O3 -mtune=native"
 if (( $AMDGPU )); then
     COMMONOPTS+=" -Wno-unused-but-set-variable -Wno-unused-result"
 else
