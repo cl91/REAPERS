@@ -134,6 +134,11 @@ class BaseEval {
 					 const MatrixType<FpType> expmbH, FpType t,
 					 const std::vector<FermionOp<FpType>> &ops) = 0;
 
+    FpType compute_ground_state_energy(const HamOp<FpType> &ham) {
+	State<FpType> s1(args.N/2-1);
+	return s1.template ground_state<Krylov>(ham.LL, args.krylov_dim, (FpType)0.1);
+    }
+
 protected:
     const SykArgParser &args;
 
@@ -190,8 +195,7 @@ public:
 	    }
 	} else {
 	    assert(s0);
-	    State<FpType> s1(args.N/2-1);
-	    auto gnd = s1.template ground_state<Krylov>(ham.LL, args.krylov_dim, (FpType)0.1);
+	    auto gnd = compute_ground_state_energy(ham);
 	    ham.LL += (-gnd) * SpinOp<FpType>::identity();
 	    ham.RR += (-gnd) * SpinOp<FpType>::identity();
 	    pre_evolve(ham.LL, *s0, args.beta);
