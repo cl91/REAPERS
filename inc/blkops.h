@@ -96,6 +96,10 @@ struct BlockDiag {
     T LL, RR;
 
     BlockDiag() : nullLL(true), nullRR(true), LL{}, RR{} {}
+    BlockDiag(T B) : LL(B), RR(B) {
+	nullLL = !B.size();
+	nullRR = !B.size();
+    }
     BlockDiag(T LL, T RR) : LL(LL), RR(RR) {
 	nullLL = !LL.size();
 	nullRR = !RR.size();
@@ -180,6 +184,11 @@ struct BlockDiag {
 	using Ty = _REAPERS_evaltype(LL.trace(std::forward<Args>(args)...));
 	return (nullLL ? Ty{} : LL.trace(std::forward<Args>(args)...))
 	    + (nullRR ? Ty{} : RR.trace(std::forward<Args>(args)...));
+    }
+
+    template<typename...Args>
+    static BlockDiag<T> identity(Args&&...args) {
+	return T::identity(std::forward<Args>(args)...);
     }
 };
 

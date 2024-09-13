@@ -76,6 +76,10 @@ public:
 	return *this;
     }
 
+    static auto identity(int len) {
+	return SubspaceView<SumOpsTy>(len, SpinOp<typename SumOpsTy::RealScalarType>::identity());
+    }
+
     using SumOpsTy::operator+=;
     using SumOpsTy::operator-=;
     using SumOpsTy::operator*=;
