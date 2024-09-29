@@ -461,11 +461,29 @@ inline auto operator+(const BlockDiag<T0> &op0,
 }
 
 template<internal::BlockType T0, internal::BlockType T1>
+inline auto operator-(const BlockDiag<T0> &op0,
+		      const BlockDiag<T1> &op1) {
+    BlockDiag<T1> op{op1};
+    op *= -1;
+    op += op0;
+    return op;
+}
+
+template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator+(const BlockAntiDiag<T0> &op0,
 		      const BlockAntiDiag<T1> &op1) {
     return BlockAntiDiag(
 	(op0.nullLR||op1.nullLR) ? (op0.nullLR?op1.LR:op0.LR) : (op0.LR + op1.LR),
 	(op0.nullRL||op1.nullRL) ? (op0.nullRL?op1.RL:op0.RL) : (op0.RL + op1.RL));
+}
+
+template<internal::BlockType T0, internal::BlockType T1>
+inline auto operator-(const BlockAntiDiag<T0> &op0,
+		      const BlockAntiDiag<T1> &op1) {
+    BlockAntiDiag<T1> op{op1};
+    op *= -1;
+    op += op0;
+    return op;
 }
 
 template<internal::BlockType T>
