@@ -76,7 +76,7 @@ if (( $NVGPU_ICPX )); then
     done
 fi
 
-PROJS="simple-syk-exdiag simple-syk-krylov syk lindblad"
+PROJS="sff"
 
 for i in $PROJS; do
     if (( $NVGPU )); then
