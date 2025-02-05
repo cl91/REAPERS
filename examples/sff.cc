@@ -181,9 +181,10 @@ public:
 	    }
 	}
 	for (int i = 0; i <= args.nsteps; i++) {
+	    using std::norm;
 	    outf << dt*i << " " << v[i].real() << " " << v[i].imag() << std::endl;
 	    sum[i] += v[i];
-	    abssum[i] += std::norm(v[i]);
+	    abssum[i] += norm(v[i]);
 	}
     }
 };
@@ -326,16 +327,17 @@ class Runner : protected SykArgParser {
 	    }
 	}
 	for (int i = 0; i <= nsteps; i++) {
+	    using std::norm;
 	    if (fp32) {
 		sum32[i] /= M;
 		abssum32[i] /= M;
-		float sff32 = abssum32[i] - std::norm(sum32[i]);
+		float sff32 = abssum32[i] - norm(sum32[i]);
 		avgf32 << dt*i << " " << sff32 << std::endl;
 	    }
 	    if (fp64) {
 		sum64[i] /= M;
 		abssum64[i] /= M;
-		double sff64 = abssum64[i] - std::norm(sum64[i]);
+		double sff64 = abssum64[i] - norm(sum64[i]);
 		avgf64 << dt*i << " " << sff64 << std::endl;
 	    }
 	}
