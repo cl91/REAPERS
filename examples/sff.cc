@@ -40,22 +40,30 @@ using HamOp = typename SYK<FpType>::HamOp;
 // Argument parser for the SYK simulation program.
 struct SykArgParser : ArgParser {
     bool dump_ham;
-    bool use_mt19937;
+    bool want_sff;
+    bool want_greenfcn;
+    bool want_otoc;
     bool regularize;
     bool seed_from_time;
     bool exact_diag;
     bool swap;
+    float beta;
     float j_coupling;
     float kry_tol;
 
 private:
     void parse_hook() {
 	optdesc.add_options()
+	    ("sff", progopts::bool_switch(&want_sff)->default_value(false),
+	     "Compute the spectral form factor.")
+	    ("green", progopts::bool_switch(&want_greenfcn)->default_value(false),
+	     "Compute the Green's function.")
+	    ("otoc", progopts::bool_switch(&want_otoc)->default_value(false),
+	     "Compute the OTOC. If neither --green or --otoc is specified, compute both.")
 	    ("dump-ham", progopts::bool_switch(&dump_ham)->default_value(false),
 	     "Dump the Hamiltonians constructed onto disk.")
-	    ("use-mt19937", progopts::bool_switch(&use_mt19937)->default_value(false),
-	     "Use the MT19937 from the C++ standard library as the pRNG."
-	     " By default, PCG64 is used.")
+	    ("beta,b", progopts::value<float>(&beta)->required(),
+	     "Specifies the inverse temperature of the simulation.")
 	    ("regularize", progopts::bool_switch(&regularize)->default_value(false),
 	     "Generate regularized sparse SYK.")
 	    ("J", progopts::value<float>(&j_coupling)->default_value(1.0),
@@ -76,6 +84,11 @@ private:
     }
 
     bool optcheck_hook() {
+	// If user didn't specify anything, compute all of them
+	if (!want_sff && !want_greenfcn && !want_otoc) {
+	    want_sff = want_greenfcn = want_otoc = true;
+	}
+
 	if (exact_diag && trace) {
 	    std::cerr << "You cannot specify both --exact-diag and --trace."
 		      << std::endl;
@@ -90,8 +103,12 @@ private:
 // realization.
 template<RealScalar FpType>
 class BaseEval {
-    virtual void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t) = 0;
-    virtual complex<FpType> evolve_trace(const HamOp<FpType> &ham, FpType t) = 0;
+    virtual void pre_evolve(const SumOps<FpType> &ham, State<FpType> &s,
+			    FpType beta) {}
+    virtual void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t,
+			FpType beta, const std::vector<FermionOp<FpType>> &ops) = 0;
+    virtual complex<FpType> evolve_trace(const HamOp<FpType> &ham, FpType t, FpType beta,
+					 const std::vector<FermionOp<FpType>> &ops) = 0;
 
     FpType compute_ground_state_energy(const HamOp<FpType> &ham) {
 	State<FpType> s1(args.N/2);
@@ -100,6 +117,7 @@ class BaseEval {
 
 protected:
     const SykArgParser &args;
+    bool normalize = true;
 
     ~BaseEval() {}
 
@@ -116,14 +134,19 @@ protected:
 
 public:
     std::string name;
+    bool sff = false;
 
     BaseEval(const char *name, const SykArgParser &args) : args(args), name(name) {}
 
     // Evaluate the n-point function from 0 to t_max. In the case where trace
     // is false (the default), we compute the inner product of s0 and s, where
-    // s0 is a random state, and s is the result of evolve() applied to s0.
-    // Note that in this case, before calling this function you must set s0
-    // to a random state. If trace is true, we call evolve_trace(), which
+    // s0 is the result of pre_evolve() applied to a random state, and s is the
+    // result of evolve() applied to s0. Note that in this case, before calling
+    // this function you must set s0 to a random state, and the state s0 is
+    // modified during the call so if you need the original initial state, you
+    // need to make a copy of it before calling this function. This is to minimize
+    // memory allocation overhead. If trace is set to true, this function
+    // computes exp(-beta H/4) as a matrix and then calls evolve_trace(), which
     // the child classes will override to compute the final n-point function by
     // tracing over the n-point operator. In both cases results will be written
     // to vector v (after normalizing them by dividing by v[0]) as well as file
@@ -140,7 +163,7 @@ public:
 	if (args.trace) {
 	    assert(!s0);
 	    for (int i = 0; i <= args.nsteps; i++) {
-		v[i] = evolve_trace(ham, i*dt) / complex<FpType>(1ULL << (args.N / 2));
+		v[i] = evolve_trace(ham, i*dt, args.beta, syk.fermion_ops());
 		auto tm = time(nullptr);
 		logger << "Time step " << i*dt << " done. Time for this step: "
 		       << tm - current_time << "s"
@@ -152,6 +175,7 @@ public:
 	    assert(s0);
 	    auto gnd = compute_ground_state_energy(ham);
 	    ham += (-gnd) * SpinOp<FpType>::identity();
+	    pre_evolve(ham, *s0, args.beta);
 	    s0->gc();
 	    std::unique_ptr<State<FpType,CPUImpl>> hostst;
 	    if (args.swap) {
@@ -166,7 +190,7 @@ public:
 		if (args.swap) {
 		    s0.reset();
 		}
-		evolve(ham, s, i*dt);
+		evolve(ham, s, i*dt, args.beta, syk.fermion_ops());
 		if (args.swap) {
 		    s.gc();
 		    s0 = std::make_unique<State<FpType>>(*hostst);
@@ -180,10 +204,14 @@ public:
 		current_time = tm;
 	    }
 	}
+	auto v0 = v[0];
 	for (int i = 0; i <= args.nsteps; i++) {
-	    using std::norm;
+	    if (normalize) {
+		v[i] /= v0;
+	    }
 	    outf << dt*i << " " << v[i].real() << " " << v[i].imag() << std::endl;
 	    sum[i] += v[i];
+	    using std::norm;
 	    abssum[i] += norm(v[i]);
 	}
     }
@@ -192,16 +220,83 @@ public:
 // This is the evaluator class for the SFF.
 template<RealScalar FpType>
 class SFF : public BaseEval<FpType> {
-    void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t) {
-        this->evolve_step(ham, s, -t, 0);
+    void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t, FpType beta,
+		const std::vector<FermionOp<FpType>> &ops) {
+        this->evolve_step(ham, s, -t, beta);
     }
 
-    complex<FpType> evolve_trace(const HamOp<FpType> &ham, FpType t) {
-	return ham.matexp({0,t}).trace();
+    complex<FpType> evolve_trace(const HamOp<FpType> &ham, FpType t, FpType beta,
+				 const std::vector<FermionOp<FpType>> &ops) {
+	auto N = this->args.N;
+	return ham.matexp({-beta,t}).trace() / FpType(1ULL << (N/2));
     }
 
 public:
-    SFF(const SykArgParser &args) : BaseEval<FpType>("SFF", args) {}
+    SFF(const SykArgParser &args) : BaseEval<FpType>("SFF", args) {
+	this->normalize = false;
+	this->sff = true;
+    }
+};
+
+// This is the evaluator class for the Green's function.
+template<RealScalar FpType>
+class Green : public BaseEval<FpType> {
+    void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t, FpType beta,
+		const std::vector<FermionOp<FpType>> &ops) {
+	auto N = this->args.N;
+	auto op = ops[N-1];
+        this->evolve_step(ham, s, 0, beta/2);
+	s *= op;
+	this->evolve_step(ham, s, t, 0);
+	s *= op;
+	this->evolve_step(ham, s, -t, beta/2);
+    }
+
+    complex<FpType> evolve_trace(const HamOp<FpType> &ham, FpType t, FpType beta,
+				 const std::vector<FermionOp<FpType>> &ops) {
+	auto m0 = ham.matexp({0,-t});
+	auto m1 = ham.matexp({-beta,t});
+	auto N = this->args.N;
+	auto op = ops[N-1].get_matrix();
+	return (m1 * op * m0 * op).trace();
+    }
+
+public:
+    Green(const SykArgParser &args) : BaseEval<FpType>("Green", args) {}
+};
+
+// This is the evaluator class for the OTOC.
+template<RealScalar FpType>
+class OTOC : public BaseEval<FpType> {
+    void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t, FpType beta,
+		const std::vector<FermionOp<FpType>> &ops) {
+	auto N = this->args.N;
+	auto op0 = ops[N-2];
+	auto op1 = ops[N-1];
+	this->evolve_step(ham, s, 0, beta/8);
+	s *= op0;
+	this->evolve_step(ham, s, t, beta/4);
+	s *= op1;
+	this->evolve_step(ham, s, -t, beta/4);
+	s *= op0;
+	this->evolve_step(ham, s, t, beta/4);
+	s *= op1;
+	this->evolve_step(ham, s, -t, beta/8);
+    }
+
+    complex<FpType> evolve_trace(const HamOp<FpType> &ham, FpType t, FpType beta,
+				 const std::vector<FermionOp<FpType>> &ops) {
+	auto N = this->args.N;
+	auto op0 = ops[N-2].get_matrix();
+	auto op1 = ops[N-1].get_matrix();
+	auto m0 = ham.matexp({0,-t});
+	auto m1 = ham.matexp({0,t});
+	auto m2 = ham.matexp({-beta,t});
+	return (m2 * op1 * m0 * op0 * m1 * op1 * m0 * op0).trace();
+    }
+
+public:
+    OTOC(const SykArgParser &args) : BaseEval<FpType>("OTOC", args) {}
 };
 
 // Helper class which execute the computational tasks represented by
@@ -209,17 +304,16 @@ public:
 // have to write args.??? in front of the command line parameters.
 class Runner : protected SykArgParser {
     // Compute all disorder realization for the given n-point function
-    template<template<typename> typename Eval, typename RandGen>
-    void runjob(RandGen &rg) {
+    template<template<typename> typename Eval, typename FpType>
+    void runjob(auto rg) {
 	std::stringstream ss;
-	ss << "N" << N << "M" << M;
+	ss << "N" << N << "M" << M << "beta" << beta;
 	if (sparsity != 0.0) {
 	    ss << "k" << sparsity;
 	} else {
 	    ss << "dense";
 	}
-	ss << (regularize ? "reg" : "")
-	   << "tmax" << tmax << "nsteps" << nsteps;
+	ss << (regularize ? "reg" : "") << "tmax" << tmax << "nsteps" << nsteps;
 	if (!exact_diag && !trace) {
 	    ss << "krydim" << krylov_dim;
 	    if (kry_tol != 0.0) {
@@ -235,47 +329,35 @@ class Runner : protected SykArgParser {
 	if (trace) {
 	    ss << "trace";
 	}
-	Eval<float> eval32(*this);
-	Eval<double> eval64(*this);
-	auto jobname = eval32.name;
+	ss << "fp" << sizeof(FpType) * 8;
+
+	Eval<FpType> eval(*this);
+	auto jobname = eval.name;
 	auto outfname = jobname + "Disorders" + ss.str();
 	auto avgfname = jobname + ss.str();
-	std::ofstream outf32, outf64;
-	std::ofstream avgf32, avgf64;
-	if (fp32) {
-	    outf32.rdbuf()->pubsetbuf(0, 0);
-	    outf32.open(outfname + "fp32");
-	    avgf32.rdbuf()->pubsetbuf(0, 0);
-	    avgf32.open(avgfname + "fp32");
-	}
-	if (fp64) {
-	    outf64.rdbuf()->pubsetbuf(0, 0);
-	    outf64.open(outfname + "fp64");
-	    avgf64.rdbuf()->pubsetbuf(0, 0);
-	    avgf64.open(avgfname + "fp64");
-	}
-	std::ofstream hamf;
+	std::ofstream outf, avgf, hamf;
+	outf.rdbuf()->pubsetbuf(0, 0);
+	outf.open(outfname);
+	avgf.rdbuf()->pubsetbuf(0, 0);
+	avgf.open(avgfname);
 	if (dump_ham) {
 	    hamf.rdbuf()->pubsetbuf(0, 0);
 	    hamf.open(std::string("Ham") + outfname);
 	}
-	std::vector<complex<float>> v32(nsteps+1);
-	std::vector<complex<double>> v64(nsteps+1);
-	std::vector<complex<float>> sum32(nsteps+1);
-	std::vector<complex<double>> sum64(nsteps+1);
-	std::vector<float> abssum32(nsteps+1);
-	std::vector<double> abssum64(nsteps+1);
+	std::vector<complex<FpType>> v(nsteps+1);
+	std::vector<complex<FpType>> sum(nsteps+1);
+	std::vector<FpType> abssum(nsteps+1);
 	std::ofstream logf;
 	logf.rdbuf()->pubsetbuf(0, 0);
 	logf.open(std::string("Log") + jobname + ss.str());
 	Logger logger(verbose, logf);
 	logger << "Running " << jobname << " calculation using build "
 	       << GITHASH << ".\nParameters are: N " << N
-	       << " M " << M << " k " << sparsity
+	       << " M " << M << " beta " << beta << " k " << sparsity
 	       << (regularize ? " regularized" : "")
 	       << " tmax " << tmax << " nsteps " << nsteps
 	       << " krydim " << krylov_dim
-	       << (use_mt19937 ? " MT19937" : " PCG64")
+	       << " PCG64"
 	       << (exact_diag ? " exact diag" : "")
 	       << (trace ? " trace" : "")
 	       << " J" << j_coupling;
@@ -283,63 +365,49 @@ class Runner : protected SykArgParser {
 	    logger << " krylov tolerance " << kry_tol;
 	}
 	logger << endl;
-	std::unique_ptr<State<float>> init32;
-	std::unique_ptr<State<double>> init64;
-	if (fp32 && !trace) {
-	    init32 = std::make_unique<State<float>>(N/2);
+	std::unique_ptr<State<FpType>> init;
+	if (!trace) {
+	    init = std::make_unique<State<FpType>>(N/2);
 	}
-	if (fp64 && !trace) {
-	    init64 = std::make_unique<State<double>>(N/2);
-	}
-	SYK<float> syk32(N, sparsity, j_coupling);
-	SYK<double> syk64(N, sparsity, j_coupling);
-	HamOp<float> ham32;
-	HamOp<double> ham64;
+	SYK<FpType> syk(N, sparsity, j_coupling);
+	HamOp<FpType> ham;
 	double dt = tmax / nsteps;
 	for (int u = 0; u < M; u++) {
 	    logger << "Computing disorder " << u << endl;
-	    if (fp32) {
-		if (!trace) {
-		    init32->random_state();
-		}
-		ham32 = syk32.gen_ham(rg, regularize);
+	    if (!trace) {
+		init->random_state();
 	    }
-	    if (fp64) {
-		if (!trace) {
-		    init64->random_state();
-		}
-		ham64 = syk64.gen_ham(rg, regularize);
-	    }
+	    ham = syk.gen_ham(rg, regularize);
 	    if (dump_ham) {
-		if (fp32) {
-		    hamf << "H = " << ham32 << std::endl;
-		}
-		if (fp64) {
-		    hamf << "H = " << ham64 << std::endl;
-		}
+		hamf << "H = " << ham << std::endl;
 	    }
 	    // Compute one single disorder realization.
-	    if (fp32) {
-		eval32.eval(syk32, ham32, init32, v32, outf32, sum32, abssum32, logger);
-	    }
-	    if (fp64) {
-		eval64.eval(syk64, ham64, init64, v64, outf64, sum64, abssum64, logger);
-	    }
+	    eval.eval(syk, ham, init, v, outf, sum, abssum, logger);
 	}
 	for (int i = 0; i <= nsteps; i++) {
-	    using std::norm;
-	    if (fp32) {
-		sum32[i] /= M;
-		abssum32[i] /= M;
-		float sff32 = abssum32[i] - norm(sum32[i]);
-		avgf32 << dt*i << " " << sff32 << std::endl;
+	    sum[i] /= M;
+	    abssum[i] /= M;
+	    if (eval.sff) {
+		using std::norm;
+		FpType sff = abssum[i] - norm(sum[i]);
+		avgf << dt*i << " " << sff << std::endl;
+	    } else {
+		avgf << dt*i << " " << sum[i].real() << " "
+		     << sum[i].imag() << std::endl;
 	    }
-	    if (fp64) {
-		sum64[i] /= M;
-		abssum64[i] /= M;
-		double sff64 = abssum64[i] - norm(sum64[i]);
-		avgf64 << dt*i << " " << sff64 << std::endl;
-	    }
+	}
+    }
+
+    template<typename FpType>
+    void run_jobs(auto rg) {
+	if (want_sff) {
+	    runjob<SFF, FpType>(rg);
+	}
+	if (want_otoc) {
+	    runjob<OTOC, FpType>(rg);
+	}
+	if (want_greenfcn) {
+	    runjob<Green, FpType>(rg);
 	}
     }
 
@@ -355,14 +423,13 @@ public:
 	    std::random_device rd;
 	    seed = rd();
 	}
-	if (use_mt19937) {
-	    // The user requested mt19937 as the pRNG. Use it.
-	    std::mt19937 rg(seed);
-	    runjob<SFF>(rg);
-	} else {
-	    // Use PCG64 as the random number engine
-	    pcg64 rg(seed);
-	    runjob<SFF>(rg);
+	// Use PCG64 as the random number engine
+	pcg64 rg(seed);
+	if (fp32) {
+	    run_jobs<float>(rg);
+	}
+	if (fp64) {
+	    run_jobs<double>(rg);
 	}
 	return 0;
     }
