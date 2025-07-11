@@ -24,6 +24,7 @@ Revision History:
 #define REAPERS_SPIN_SITES	(MAX_NUM_FERMIONS / 2)
 #endif
 
+#define REAPERS_USE_PARITY_BLOCKS
 #include <reapers.h>
 #include "common.h"
 
@@ -103,25 +104,25 @@ private:
 // realization.
 template<RealScalar FpType>
 class BaseEval {
-    virtual void pre_evolve(const SumOps<FpType> &ham, State<FpType> &s,
+    virtual void pre_evolve(const HamOp<FpType> &ham, BlockState<FpType> &s,
 			    FpType beta) {}
-    virtual void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t,
+    virtual void evolve(const HamOp<FpType> &ham, BlockState<FpType> &s, FpType t,
 			FpType beta, const std::vector<FermionOp<FpType>> &ops) = 0;
     virtual complex<FpType> evolve_trace(const HamOp<FpType> &ham, FpType t, FpType beta,
 					 const std::vector<FermionOp<FpType>> &ops) = 0;
 
     FpType compute_ground_state_energy(const HamOp<FpType> &ham) {
-	State<FpType> s1(args.N/2);
+	BlockState<FpType> s1(args.N/2);
 	return s1.template ground_state<Krylov>(ham, args.krylov_dim, (FpType)0.1);
     }
 
 protected:
     const SykArgParser &args;
-    bool normalize = true;
+    bool normalize = false;
 
     ~BaseEval() {}
 
-    void evolve_step(const SumOps<FpType> &ham, State<FpType> &s,
+    void evolve_step(const HamOp<FpType> &ham, BlockState<FpType> &s,
 		     FpType t, FpType beta) {
 	if (args.exact_diag) {
 	    s.template evolve<ExactDiagonalization>(ham, t, beta);
@@ -152,7 +153,7 @@ public:
     // to vector v (after normalizing them by dividing by v[0]) as well as file
     // outf, and accumulated into sum.
     void eval(const SYK<FpType> &syk, HamOp<FpType> &ham,
-	      std::unique_ptr<State<FpType>> &s0,
+	      std::unique_ptr<BlockState<FpType>> &s0,
 	      std::vector<complex<FpType>> &v, std::ofstream &outf,
 	      std::vector<complex<FpType>> &sum,
 	      std::vector<FpType> &abssum, Logger &logger) {
@@ -174,26 +175,27 @@ public:
 	} else {
 	    assert(s0);
 	    auto gnd = compute_ground_state_energy(ham);
-	    ham += (-gnd) * SpinOp<FpType>::identity();
+	    ham.LL += (-gnd) * SpinOp<FpType>::identity();
+	    ham.RR += (-gnd) * SpinOp<FpType>::identity();
 	    pre_evolve(ham, *s0, args.beta);
 	    s0->gc();
-	    std::unique_ptr<State<FpType,CPUImpl>> hostst;
+	    std::unique_ptr<BlockState<FpType,CPUImpl>> hostst;
 	    if (args.swap) {
-		hostst = std::make_unique<State<FpType,CPUImpl>>(*s0);
+		hostst = std::make_unique<BlockState<FpType,CPUImpl>>(*s0);
 	    }
 	    auto tm = time(nullptr);
 	    logger << "Pre-evolve done. Time spent: "
 		   << tm - current_time << "s." << endl;
 	    current_time = tm;
 	    for (int i = 0; i <= args.nsteps; i++) {
-		State<FpType> s(*s0);
+		BlockState<FpType> s(*s0);
 		if (args.swap) {
 		    s0.reset();
 		}
 		evolve(ham, s, i*dt, args.beta, syk.fermion_ops());
 		if (args.swap) {
 		    s.gc();
-		    s0 = std::make_unique<State<FpType>>(*hostst);
+		    s0 = std::make_unique<BlockState<FpType>>(*hostst);
 		}
 		v[i] = (*s0) * s;
 		auto tm = time(nullptr);
@@ -220,7 +222,7 @@ public:
 // This is the evaluator class for the SFF.
 template<RealScalar FpType>
 class SFF : public BaseEval<FpType> {
-    void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t, FpType beta,
+    void evolve(const HamOp<FpType> &ham, BlockState<FpType> &s, FpType t, FpType beta,
 		const std::vector<FermionOp<FpType>> &ops) {
         this->evolve_step(ham, s, -t, beta);
     }
@@ -228,7 +230,7 @@ class SFF : public BaseEval<FpType> {
     complex<FpType> evolve_trace(const HamOp<FpType> &ham, FpType t, FpType beta,
 				 const std::vector<FermionOp<FpType>> &ops) {
 	auto N = this->args.N;
-	return ham.matexp({-beta,t}).trace() / FpType(1ULL << (N/2));
+	return ham.matexp(complex{-beta,t}).trace() / FpType(1ULL << (N/2));
     }
 
 public:
@@ -241,7 +243,7 @@ public:
 // This is the evaluator class for the Green's function.
 template<RealScalar FpType>
 class Green : public BaseEval<FpType> {
-    void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t, FpType beta,
+    void evolve(const HamOp<FpType> &ham, BlockState<FpType> &s, FpType t, FpType beta,
 		const std::vector<FermionOp<FpType>> &ops) {
 	auto N = this->args.N;
 	auto op = ops[N-1];
@@ -254,8 +256,8 @@ class Green : public BaseEval<FpType> {
 
     complex<FpType> evolve_trace(const HamOp<FpType> &ham, FpType t, FpType beta,
 				 const std::vector<FermionOp<FpType>> &ops) {
-	auto m0 = ham.matexp({0,-t});
-	auto m1 = ham.matexp({-beta,t});
+	auto m0 = ham.matexp(complex<FpType>{0,-t});
+	auto m1 = ham.matexp(complex<FpType>{-beta,t});
 	auto N = this->args.N;
 	auto op = ops[N-1].get_matrix();
 	return (m1 * op * m0 * op).trace();
@@ -268,7 +270,7 @@ public:
 // This is the evaluator class for the OTOC.
 template<RealScalar FpType>
 class OTOC : public BaseEval<FpType> {
-    void evolve(const HamOp<FpType> &ham, State<FpType> &s, FpType t, FpType beta,
+    void evolve(const HamOp<FpType> &ham, BlockState<FpType> &s, FpType t, FpType beta,
 		const std::vector<FermionOp<FpType>> &ops) {
 	auto N = this->args.N;
 	auto op0 = ops[N-2];
@@ -289,9 +291,9 @@ class OTOC : public BaseEval<FpType> {
 	auto N = this->args.N;
 	auto op0 = ops[N-2].get_matrix();
 	auto op1 = ops[N-1].get_matrix();
-	auto m0 = ham.matexp({0,-t});
-	auto m1 = ham.matexp({0,t});
-	auto m2 = ham.matexp({-beta,t});
+	auto m0 = ham.matexp(complex<FpType>{0,-t});
+	auto m1 = ham.matexp(complex<FpType>{0,t});
+	auto m2 = ham.matexp(complex<FpType>{-beta,t});
 	return (m2 * op1 * m0 * op0 * m1 * op1 * m0 * op0).trace();
     }
 
@@ -365,9 +367,9 @@ class Runner : protected SykArgParser {
 	    logger << " krylov tolerance " << kry_tol;
 	}
 	logger << endl;
-	std::unique_ptr<State<FpType>> init;
+	std::unique_ptr<BlockState<FpType>> init;
 	if (!trace) {
-	    init = std::make_unique<State<FpType>>(N/2);
+	    init = std::make_unique<BlockState<FpType>>(N/2);
 	}
 	SYK<FpType> syk(N, sparsity, j_coupling);
 	HamOp<FpType> ham;
