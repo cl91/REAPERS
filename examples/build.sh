@@ -64,7 +64,7 @@ fi
 # This might make things a little faster, but probably won't matter much.
 NVCC="nvcc -forward-unknown-to-host-compiler $COMMONOPTS -Wno-unknown-pragmas -diag-suppress 68 -lcublas -lcusolver -lcurand ../src/krnl.cu -march=native -fopenmp $LINKLIBS -arch sm_80"
 HIPCC="hipcc $COMMONOPTS -D__HIPCC__ -lhipblas -lhipsolver -lhiprand ../src/krnl.cu -march=native -fopenmp $LINKLIBS"
-CXX="c++ -DREAPERS_NOGPU $COMMONOPTS -march=native -fopenmp $LINKLIBS"
+CXX="c++ -DREAPERS_NOGPU $COMMONOPTS -march=native -fopenmp -Wl,--start-group $LINKLIBS"
 ICXX="icpx -DREAPERS_NOGPU $COMMONOPTS -xhost -fiopenmp -Wno-tautological-constant-compare -Wno-unused-but-set-variable $LINKLIBS"
 ICXX_BUILD="icpx $COMMONOPTS -fPIE -xhost -fiopenmp -Wno-tautological-constant-compare -Wno-unused-but-set-variable -Wno-unknown-pragmas -I/opt/cuda/include"
 if (( $NVGPU_ICPX )); then
