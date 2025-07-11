@@ -376,6 +376,13 @@ struct BlockOp : BlockDiag<T>, BlockAntiDiag<T> {
     }
 };
 
+// Define a concept which checks whether the class B is a specialization of
+// one of the three block matrix forms.
+template<typename B>
+concept BlockMatrix = internal::Specializes<B, BlockDiag>
+    || internal::Specializes<B, BlockAntiDiag>
+    || internal::Specializes<B, BlockOp>;
+
 template<internal::BlockType T>
 struct BlockVec;
 
@@ -441,16 +448,19 @@ struct BlockVec {
 	if (!nullR) { R *= c; }
 	return *this;
     }
+
+    template<BlockMatrix B>
+    BlockVec &operator*=(B op) {
+	*this = op * *this;
+	return *this;
+    }
 };
 
 // Define a concept which checks whether the class B is a specialization of
-// one of the four block matrix forms. This is needed when we define the
+// one of the four block forms. This is needed when we define the
 // operators below.
 template<typename B>
-concept BlockForm = internal::Specializes<B, BlockDiag>
-    || internal::Specializes<B, BlockAntiDiag>
-    || internal::Specializes<B, BlockOp>
-    || internal::Specializes<B, BlockVec>;
+concept BlockForm = BlockMatrix<B> || internal::Specializes<B, BlockVec>;
 
 template<internal::BlockType T0, internal::BlockType T1>
 inline auto operator+(const BlockDiag<T0> &op0,
